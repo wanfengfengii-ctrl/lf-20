@@ -297,6 +297,7 @@ function applyStyleToElements(
       return {
         ...textEl,
         fontFamily: styleRule.fontFamily,
+        fontSize: styleRule.fontSize,
         fontWeight: styleRule.fontWeight,
         fontStyle: styleRule.fontStyle,
         textAlign: styleRule.textAlign,

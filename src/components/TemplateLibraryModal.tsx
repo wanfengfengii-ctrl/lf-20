@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Modal,
   TextInput,
@@ -11,7 +11,7 @@ import {
   Box,
   Center,
 } from '@mantine/core';
-import { IconSearch, IconPlus, IconTemplate } from '@tabler/icons-react';
+import { IconSearch, IconPlus, IconTemplate, IconUpload } from '@tabler/icons-react';
 import { TemplateCard } from './TemplateCard';
 import { SaveTemplateModal } from './SaveTemplateModal';
 import type { DesignTemplate, TemplateType, CanvasElement, PaperConfig } from '../types';
@@ -24,6 +24,7 @@ import {
   downloadTemplateFile,
   generateTemplateThumbnail,
   updateTemplate,
+  importTemplate,
 } from '../utils/templateStorage';
 import { notifications } from '@mantine/notifications';
 
@@ -49,6 +50,7 @@ export function TemplateLibraryModal({
   const [saveModalOpened, setSaveModalOpened] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<DesignTemplate | null>(null);
   const [activeTab, setActiveTab] = useState<string | null>('all');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadTemplates = () => {
     const allTemplates = getAllTemplates();
@@ -80,17 +82,19 @@ export function TemplateLibraryModal({
       const thumbnail = await generateTemplateThumbnail(elements, paper);
 
       if (editingTemplate) {
-        updateTemplate(editingTemplate.id, {
-          name: options.name,
-          category: options.category,
-          tags: options.tags,
-          description: options.description,
-          type: options.type,
+        const updatedTemplate = createTemplate(elements, paper, {
+          ...options,
           thumbnail,
+        });
+        updateTemplate(editingTemplate.id, {
+          ...updatedTemplate,
+          id: editingTemplate.id,
+          createdAt: editingTemplate.createdAt,
+          usageCount: editingTemplate.usageCount,
         });
         notifications.show({
           title: '更新成功',
-          message: '模板信息已更新',
+          message: '模板信息和内容已更新',
           color: 'green',
         });
       } else {
@@ -148,6 +152,57 @@ export function TemplateLibraryModal({
     onClose();
   };
 
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        let importedTemplate = importTemplate(content);
+        
+        if (importedTemplate) {
+          importedTemplate = {
+            ...importedTemplate,
+            id: `template_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            usageCount: 0,
+          };
+          saveTemplate(importedTemplate);
+          loadTemplates();
+          notifications.show({
+            title: '导入成功',
+            message: `模板 "${importedTemplate.name}" 已导入`,
+            color: 'green',
+          });
+        } else {
+          notifications.show({
+            title: '导入失败',
+            message: '模板文件格式不正确',
+            color: 'red',
+          });
+        }
+      } catch (err) {
+        notifications.show({
+          title: '导入失败',
+          message: '读取文件失败，请重试',
+          color: 'red',
+        });
+      }
+    };
+    reader.readAsText(file);
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const categories = useMemo(() => {
     const cats = new Set(templates.map((t) => t.category));
     return ['全部', ...Array.from(cats)];
@@ -184,15 +239,31 @@ export function TemplateLibraryModal({
                 size="sm"
               />
             </Group>
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={() => {
-                setEditingTemplate(null);
-                setSaveModalOpened(true);
-              }}
-            >
-              保存当前设计
-            </Button>
+            <Group gap="sm">
+              <Button
+                variant="light"
+                leftSection={<IconUpload size={16} />}
+                onClick={handleImportClick}
+              >
+                导入模板
+              </Button>
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={() => {
+                  setEditingTemplate(null);
+                  setSaveModalOpened(true);
+                }}
+              >
+                保存当前设计
+              </Button>
+            </Group>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              style={{ display: 'none' }}
+              onChange={handleImportFile}
+            />
           </Group>
 
           <Group gap={4} grow noWrap align="flex-start">
