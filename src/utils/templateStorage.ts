@@ -366,8 +366,9 @@ export function applyTemplateToNewDesign(template: DesignTemplate): {
   }
 
   const elements: CanvasElement[] = [];
+  const style = template.style;
 
-  if (template.layout?.titlePositions.length && template.style) {
+  if (template.layout?.titlePositions.length && style) {
     template.layout.titlePositions.forEach((pos, index) => {
       elements.push({
         id: generateId(),
@@ -378,12 +379,12 @@ export function applyTemplateToNewDesign(template: DesignTemplate): {
         height: pos.height,
         rotation: 0,
         text: index === 0 ? '标题文字' : '副标题',
-        ...template.style.titleStyle,
+        ...style.titleStyle,
       } as TextElement);
     });
   }
 
-  if (template.layout?.bodyPositions.length && template.style) {
+  if (template.layout?.bodyPositions.length && style) {
     template.layout.bodyPositions.forEach((pos, index) => {
       elements.push({
         id: generateId(),
@@ -394,12 +395,12 @@ export function applyTemplateToNewDesign(template: DesignTemplate): {
         height: pos.height,
         rotation: 0,
         text: `正文内容 ${index + 1}`,
-        ...template.style.bodyStyle,
+        ...style.bodyStyle,
       } as TextElement);
     });
   }
 
-  if (template.layout?.leadPositions.length && template.style) {
+  if (template.layout?.leadPositions.length && style) {
     template.layout.leadPositions.forEach((pos) => {
       elements.push({
         id: generateId(),
@@ -409,12 +410,12 @@ export function applyTemplateToNewDesign(template: DesignTemplate): {
         width: pos.width,
         height: pos.height,
         rotation: 0,
-        fill: template.style.leadColor,
+        fill: style.leadColor,
       } as LeadElement);
     });
   }
 
-  if (template.layout?.decorationPositions.length && template.style) {
+  if (template.layout?.decorationPositions.length && style) {
     template.layout.decorationPositions.forEach((pos) => {
       elements.push({
         id: generateId(),
@@ -425,14 +426,14 @@ export function applyTemplateToNewDesign(template: DesignTemplate): {
         width: pos.width,
         height: pos.height,
         rotation: 0,
-        fill: template.style.decorationStyle.fill,
-        strokeWidth: template.style.decorationStyle.strokeWidth,
-        strokeColor: template.style.decorationStyle.strokeColor,
+        fill: style.decorationStyle.fill,
+        strokeWidth: style.decorationStyle.strokeWidth,
+        strokeColor: style.decorationStyle.strokeColor,
       } as DecorationElement);
     });
   }
 
-  if (elements.length === 0 && template.style) {
+  if (elements.length === 0 && style) {
     elements.push({
       id: generateId(),
       type: 'text',
@@ -442,7 +443,7 @@ export function applyTemplateToNewDesign(template: DesignTemplate): {
       height: 40,
       rotation: 0,
       text: '标题文字',
-      ...template.style.titleStyle,
+      ...style.titleStyle,
     } as TextElement);
 
     elements.push({
@@ -454,7 +455,7 @@ export function applyTemplateToNewDesign(template: DesignTemplate): {
       height: 80,
       rotation: 0,
       text: '这里是正文内容，用于展示风格模板的效果。您可以根据需要修改文字内容。',
-      ...template.style.bodyStyle,
+      ...style.bodyStyle,
     } as TextElement);
   }
 
@@ -462,7 +463,7 @@ export function applyTemplateToNewDesign(template: DesignTemplate): {
     elements,
     paper: {
       ...template.paper,
-      backgroundColor: template.style?.backgroundColor || template.paper.backgroundColor,
+      backgroundColor: style?.backgroundColor || template.paper.backgroundColor,
     },
   };
 }

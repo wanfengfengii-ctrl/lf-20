@@ -10,11 +10,31 @@ import {
   Text,
   Box,
   Center,
+  Badge,
+  ScrollArea,
+  ThemeIcon,
+  Divider,
+  Select,
 } from '@mantine/core';
-import { IconSearch, IconPlus, IconTemplate, IconUpload } from '@tabler/icons-react';
+import {
+  IconSearch,
+  IconPlus,
+  IconTemplate,
+  IconUpload,
+  IconSparkles,
+  IconClock,
+  IconSortDescending,
+  IconCopy,
+  IconEye,
+  IconFilter,
+  IconStar,
+} from '@tabler/icons-react';
 import { TemplateCard } from './TemplateCard';
 import { SaveTemplateModal } from './SaveTemplateModal';
-import type { DesignTemplate, TemplateType, CanvasElement, PaperConfig } from '../types';
+import { TemplatePreviewModal } from './TemplatePreviewModal';
+import { BatchApplyModal } from './BatchApplyModal';
+import type { DesignTemplate, TemplateType, CanvasElement, PaperConfig, SceneCategory } from '../types';
+import { SCENE_CATEGORIES } from '../types';
 import {
   getAllTemplates,
   searchTemplates,
@@ -26,7 +46,16 @@ import {
   updateTemplate,
   importTemplate,
 } from '../utils/templateStorage';
+import {
+  recommendTemplates,
+  detectScene,
+  getRecentTemplates,
+  addRecentTemplate,
+  sortTemplatesBySimilarity,
+} from '../utils/templateRecommendation';
 import { notifications } from '@mantine/notifications';
+
+type SortType = 'similarity' | 'recent' | 'usage' | 'newest' | 'name';
 
 interface TemplateLibraryModalProps {
   opened: boolean;
@@ -49,7 +78,13 @@ export function TemplateLibraryModal({
   const [activeCategory, setActiveCategory] = useState('全部');
   const [saveModalOpened, setSaveModalOpened] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<DesignTemplate | null>(null);
-  const [activeTab, setActiveTab] = useState<string | null>('all');
+  const [activeTab, setActiveTab] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<SortType>('similarity');
+  const [sceneFilter, setSceneFilter] = useState<SceneCategory | 'all'>('all');
+  const [previewTemplate, setPreviewTemplate] = useState<DesignTemplate | null>(null);
+  const [batchModalOpened, setBatchModalOpened] = useState(false);
+  const [batchTemplate, setBatchTemplate] = useState<DesignTemplate | null>(null);
+  const [detectedScene, setDetectedScene] = useState<ReturnType<typeof detectScene> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadTemplates = () => {
@@ -60,16 +95,75 @@ export function TemplateLibraryModal({
   useEffect(() => {
     if (opened) {
       loadTemplates();
+      setDetectedScene(detectScene(elements, paper));
     }
-  }, [opened]);
+  }, [opened, elements, paper]);
+
+  const recentTemplateIds = useMemo(() => getRecentTemplates(), [opened, templates]);
+
+  const recommendations = useMemo(() => {
+    if (templates.length === 0) return [];
+    return recommendTemplates(templates, elements, paper, {
+      limit: 6,
+      type: filterType === 'all' ? 'all' : filterType,
+    });
+  }, [templates, elements, paper, filterType]);
 
   const filteredTemplates = useMemo(() => {
     const typeFilter = filterType === 'all' ? undefined : filterType;
-    return searchTemplates(searchQuery, {
+    let result = searchTemplates(searchQuery, {
       category: activeCategory,
       type: typeFilter,
     });
-  }, [searchQuery, filterType, activeCategory, templates]);
+
+    if (sceneFilter !== 'all') {
+      const sceneLabel = SCENE_CATEGORIES.find((s) => s.value === sceneFilter)?.label;
+      if (sceneLabel) {
+        result = result.filter(
+          (t) =>
+            t.category === sceneLabel ||
+            t.tags.some((tag) => tag.includes(sceneLabel) || sceneLabel.includes(tag))
+        );
+      }
+    }
+
+    switch (sortBy) {
+      case 'similarity':
+        result = sortTemplatesBySimilarity(result, elements, paper);
+        break;
+      case 'recent':
+        const recentIds = getRecentTemplates();
+        result = [...result].sort((a, b) => {
+          const aIndex = recentIds.indexOf(a.id);
+          const bIndex = recentIds.indexOf(b.id);
+          if (aIndex === -1 && bIndex === -1) return 0;
+          if (aIndex === -1) return 1;
+          if (bIndex === -1) return -1;
+          return aIndex - bIndex;
+        });
+        break;
+      case 'usage':
+        result = [...result].sort((a, b) => b.usageCount - a.usageCount);
+        break;
+      case 'newest':
+        result = [...result].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        break;
+      case 'name':
+        result = [...result].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+        break;
+    }
+
+    return result;
+  }, [searchQuery, filterType, activeCategory, templates, sortBy, sceneFilter, elements, paper]);
+
+  const recentTemplates = useMemo(() => {
+    const recentIds = getRecentTemplates();
+    return recentIds
+      .map((id) => templates.find((t) => t.id === id))
+      .filter((t): t is DesignTemplate => !!t);
+  }, [templates, opened]);
 
   const handleSaveTemplate = async (options: {
     name: string;
@@ -148,8 +242,18 @@ export function TemplateLibraryModal({
   };
 
   const handleApplyTemplate = (template: DesignTemplate) => {
+    addRecentTemplate(template.id);
     onApplyTemplate(template);
     onClose();
+  };
+
+  const handlePreviewTemplate = (template: DesignTemplate) => {
+    setPreviewTemplate(template);
+  };
+
+  const handleBatchApply = (template: DesignTemplate) => {
+    setBatchTemplate(template);
+    setBatchModalOpened(true);
   };
 
   const handleImportClick = () => {
@@ -208,15 +312,33 @@ export function TemplateLibraryModal({
     return ['全部', ...Array.from(cats)];
   }, [templates]);
 
+  const sortOptions = [
+    { value: 'similarity', label: '智能匹配' },
+    { value: 'recent', label: '最近使用' },
+    { value: 'usage', label: '使用频率' },
+    { value: 'newest', label: '最新创建' },
+    { value: 'name', label: '名称排序' },
+  ];
+
   return (
     <>
       <Modal
         opened={opened}
         onClose={onClose}
-        title="模板库"
+        title={
+          <Group gap="sm">
+            <IconTemplate size={22} color="#228be6" />
+            <Text fw={600} size="xl">
+              模板库
+            </Text>
+            <Badge color="violet" variant="light" size="lg" leftSection={<IconSparkles size={12} />}>
+              智能推荐
+            </Badge>
+          </Group>
+        }
         size="xl"
         fullScreen
-        style={{ maxWidth: 1200 }}
+        style={{ maxWidth: 1400 }}
       >
         <Stack gap="md" h="calc(100vh - 120px)">
           <Group justify="space-between" wrap="nowrap">
@@ -266,64 +388,397 @@ export function TemplateLibraryModal({
             />
           </Group>
 
-          <Group gap={4} grow noWrap align="flex-start">
-            <Box style={{ width: 140, flexShrink: 0 }}>
+          {detectedScene && elements.length > 0 && (
+            <Group gap="xs">
+              <ThemeIcon size="sm" color="violet" variant="light">
+                <IconSparkles size={14} />
+              </ThemeIcon>
+              <Text size="sm" c="dimmed">
+                智能识别当前场景为
+              </Text>
+              <Badge color="violet" variant="light" size="lg">
+                {SCENE_CATEGORIES.find((s) => s.value === detectedScene.scene)?.label || '未知'}
+              </Badge>
+              <Text size="xs" c="dimmed">
+                (置信度 {detectedScene.confidence}%)
+              </Text>
+              {detectedScene.indicators.length > 0 && (
+                <Text size="xs" c="dimmed">
+                  · {detectedScene.indicators[0]}
+                </Text>
+              )}
+            </Group>
+          )}
+
+          {recommendations.length > 0 && elements.length > 0 && activeTab === 'all' && (
+            <Box>
+              <Group justify="space-between" mb="xs">
+                <Group gap="xs">
+                  <ThemeIcon size="md" color="grape" variant="filled">
+                    <IconSparkles size={16} />
+                  </ThemeIcon>
+                  <Text fw={600} size="lg">
+                    为你推荐
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    基于当前设计智能匹配
+                  </Text>
+                </Group>
+                <Button
+                  variant="subtle"
+                  size="xs"
+                  rightSection={<IconEye size={14} />}
+                  onClick={() => setActiveTab('recommendations')}
+                >
+                  查看更多
+                </Button>
+              </Group>
+              <SimpleGrid cols={{ base: 2, sm: 3, md: 6 }} spacing="sm">
+                {recommendations.slice(0, 6).map((rec) => (
+                  <TemplateCard
+                    key={rec.template.id}
+                    template={rec.template}
+                    onApply={handleApplyTemplate}
+                    onDelete={handleDeleteTemplate}
+                    onEdit={handleEditTemplate}
+                    onExport={handleExportTemplate}
+                    onBatchApply={handleBatchApply}
+                    similarity={rec.similarity}
+                    isRecommended={true}
+                    matchLevel={rec.matchLevel}
+                    showPreview={handlePreviewTemplate}
+                  />
+                ))}
+              </SimpleGrid>
+              <Divider my="md" />
+            </Box>
+          )}
+
+          {recentTemplates.length > 0 && activeTab === 'all' && (
+            <Box>
+              <Group justify="space-between" mb="xs">
+                <Group gap="xs">
+                  <ThemeIcon size="md" color="orange" variant="light">
+                    <IconClock size={16} />
+                  </ThemeIcon>
+                  <Text fw={600} size="lg">
+                    最近使用
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    快速访问常用模板
+                  </Text>
+                </Group>
+              </Group>
+              <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }} spacing="sm">
+                {recentTemplates.slice(0, 5).map((template) => (
+                  <TemplateCard
+                    key={template.id}
+                    template={template}
+                    onApply={handleApplyTemplate}
+                    onDelete={handleDeleteTemplate}
+                    onEdit={handleEditTemplate}
+                    onExport={handleExportTemplate}
+                    onBatchApply={handleBatchApply}
+                    isRecent={true}
+                    showPreview={handlePreviewTemplate}
+                  />
+                ))}
+              </SimpleGrid>
+              <Divider my="md" />
+            </Box>
+          )}
+
+          <Group gap={4} grow wrap="nowrap" align="flex-start" style={{ flex: 1, minHeight: 0 }}>
+            <Box style={{ width: 180, flexShrink: 0 }}>
               <Stack gap={2}>
                 <Text size="xs" fw={500} c="dimmed" px="xs" py={4}>
-                  分类
+                  浏览
                 </Text>
-                {categories.map((cat) => (
+                <Button
+                  variant={activeTab === 'all' ? 'light' : 'subtle'}
+                  size="sm"
+                  fullWidth
+                  justify="flex-start"
+                  leftSection={<IconTemplate size={14} />}
+                  onClick={() => setActiveTab('all')}
+                >
+                  全部模板
+                </Button>
+                <Button
+                  variant={activeTab === 'recommendations' ? 'light' : 'subtle'}
+                  size="sm"
+                  fullWidth
+                  justify="flex-start"
+                  leftSection={<IconSparkles size={14} />}
+                  onClick={() => setActiveTab('recommendations')}
+                >
+                  智能推荐
+                  {recommendations.length > 0 && (
+                    <Badge size="xs" color="grape" variant="filled" ml="auto">
+                      {recommendations.length}
+                    </Badge>
+                  )}
+                </Button>
+                <Button
+                  variant={activeTab === 'recent' ? 'light' : 'subtle'}
+                  size="sm"
+                  fullWidth
+                  justify="flex-start"
+                  leftSection={<IconClock size={14} />}
+                  onClick={() => setActiveTab('recent')}
+                >
+                  最近使用
+                </Button>
+
+                <Text size="xs" fw={500} c="dimmed" px="xs" py={4} mt="md">
+                  场景筛选
+                </Text>
+                <Stack gap={2}>
                   <Button
-                    key={cat}
-                    variant={activeCategory === cat ? 'light' : 'subtle'}
+                    variant={sceneFilter === 'all' ? 'light' : 'subtle'}
                     size="sm"
                     fullWidth
                     justify="flex-start"
-                    onClick={() => setActiveCategory(cat)}
+                    leftSection={<IconFilter size={14} />}
+                    onClick={() => setSceneFilter('all')}
                   >
-                    {cat}
+                    全部场景
                   </Button>
-                ))}
+                  {SCENE_CATEGORIES.map((scene) => (
+                    <Button
+                      key={scene.value}
+                      variant={sceneFilter === scene.value ? 'light' : 'subtle'}
+                      size="sm"
+                      fullWidth
+                      justify="flex-start"
+                      onClick={() => setSceneFilter(scene.value)}
+                    >
+                      {scene.label}
+                    </Button>
+                  ))}
+                </Stack>
+
+                <Text size="xs" fw={500} c="dimmed" px="xs" py={4} mt="md">
+                  分类
+                </Text>
+                <ScrollArea h={150}>
+                  <Stack gap={2}>
+                    {categories.map((cat) => (
+                      <Button
+                        key={cat}
+                        variant={activeCategory === cat ? 'light' : 'subtle'}
+                        size="sm"
+                        fullWidth
+                        justify="flex-start"
+                        onClick={() => setActiveCategory(cat)}
+                      >
+                        {cat}
+                      </Button>
+                    ))}
+                  </Stack>
+                </ScrollArea>
               </Stack>
             </Box>
 
-            <Box style={{ flex: 1, overflow: 'auto' }}>
-              {filteredTemplates.length > 0 ? (
-                <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="md">
-                  {filteredTemplates.map((template) => (
-                    <TemplateCard
-                      key={template.id}
-                      template={template}
-                      onApply={handleApplyTemplate}
-                      onDelete={handleDeleteTemplate}
-                      onEdit={handleEditTemplate}
-                      onExport={handleExportTemplate}
-                    />
-                  ))}
-                </SimpleGrid>
-              ) : (
-                <Center style={{ height: '100%', minHeight: 300 }}>
-                  <Stack align="center" gap="md">
-                    <IconTemplate size={48} color="#adb5bd" />
-                    <Stack gap={4} align="center">
-                      <Text fw={500} size="lg">
-                        暂无模板
-                      </Text>
-                      <Text size="sm" c="dimmed" ta="center" maw={300}>
-                        {searchQuery || filterType !== 'all' || activeCategory !== '全部'
-                          ? '没有找到匹配的模板，试试其他搜索条件'
-                          : '还没有保存任何模板，点击"保存当前设计"开始创建'}
-                      </Text>
+            <Box style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <Group justify="space-between" mb="xs">
+                <Group gap="sm">
+                  <Select
+                    value={sortBy}
+                    onChange={(val) => setSortBy(val as SortType)}
+                    data={sortOptions}
+                    size="sm"
+                    leftSection={<IconSortDescending size={14} />}
+                    style={{ width: 140 }}
+                  />
+                  <Text size="sm" c="dimmed">
+                    共 {filteredTemplates.length} 个模板
+                  </Text>
+                </Group>
+                <Group gap="sm">
+                  <Button
+                    variant="light"
+                    size="sm"
+                    leftSection={<IconCopy size={14} />}
+                    onClick={() => {
+                      if (filteredTemplates.length > 0) {
+                        setBatchTemplate(filteredTemplates[0]);
+                        setBatchModalOpened(true);
+                      }
+                    }}
+                    disabled={filteredTemplates.length === 0}
+                  >
+                    批量套用
+                  </Button>
+                </Group>
+              </Group>
+
+              <ScrollArea style={{ flex: 1 }}>
+                {activeTab === 'recommendations' ? (
+                  recommendations.length > 0 ? (
+                    <Stack gap="md">
+                      <Box p="md" style={{ background: '#f8f0fc', borderRadius: 8, border: '1px solid #e599f7' }}>
+                        <Group gap="sm" mb="sm">
+                          <ThemeIcon color="grape" size="lg">
+                            <IconSparkles size={20} />
+                          </ThemeIcon>
+                          <div>
+                            <Text fw={600}>智能推荐说明</Text>
+                            <Text size="sm" c="dimmed">
+                              基于纸张尺寸、元素数量、标题正文比例、装饰密度和留白情况综合匹配
+                            </Text>
+                          </div>
+                        </Group>
+                        <SimpleGrid cols={3} spacing="sm">
+                          {[
+                            { label: '纸张尺寸匹配', desc: '尺寸和比例越接近分数越高' },
+                            { label: '文字层级相似', desc: '标题正文比例影响阅读节奏' },
+                            { label: '留白风格接近', desc: '边距比例反映版面呼吸感' },
+                          ].map((item, i) => (
+                            <Box key={i} p="sm" style={{ background: 'white', borderRadius: 6 }}>
+                              <Text fw={500} size="sm">
+                                {item.label}
+                              </Text>
+                              <Text size="xs" c="dimmed">
+                                {item.desc}
+                              </Text>
+                            </Box>
+                          ))}
+                        </SimpleGrid>
+                      </Box>
+                      <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="md">
+                        {recommendations.map((rec) => (
+                          <Stack key={rec.template.id} gap="xs">
+                            <TemplateCard
+                              template={rec.template}
+                              onApply={handleApplyTemplate}
+                              onDelete={handleDeleteTemplate}
+                              onEdit={handleEditTemplate}
+                              onExport={handleExportTemplate}
+                              onBatchApply={handleBatchApply}
+                              similarity={rec.similarity}
+                              isRecommended={true}
+                              matchLevel={rec.matchLevel}
+                              showPreview={handlePreviewTemplate}
+                            />
+                            {rec.reasons.length > 0 && (
+                              <Stack gap={2} p="xs" style={{ background: '#f8f9fa', borderRadius: 6 }}>
+                                <Text size="xs" fw={500} c="dimmed">
+                                  推荐理由
+                                </Text>
+                                {rec.reasons.slice(0, 2).map((reason) => (
+                                  <Group key={reason.id} gap={4}>
+                                    <IconStar size={10} color="#fab005" />
+                                    <Text size="xs" lineClamp={1}>
+                                      {reason.title}
+                                    </Text>
+                                  </Group>
+                                ))}
+                              </Stack>
+                            )}
+                          </Stack>
+                        ))}
+                      </SimpleGrid>
                     </Stack>
-                  </Stack>
-                </Center>
-              )}
+                  ) : (
+                    <Center style={{ height: 300 }}>
+                      <Stack align="center" gap="md">
+                        <IconSparkles size={48} color="#adb5bd" />
+                        <Stack gap={4} align="center">
+                          <Text fw={500} size="lg">
+                            暂无推荐
+                          </Text>
+                          <Text size="sm" c="dimmed" ta="center" maw={300}>
+                            保存更多模板后，系统将为你智能推荐匹配的模板
+                          </Text>
+                        </Stack>
+                      </Stack>
+                    </Center>
+                  )
+                ) : activeTab === 'recent' ? (
+                  recentTemplates.length > 0 ? (
+                    <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="md">
+                      {recentTemplates.map((template) => (
+                        <TemplateCard
+                          key={template.id}
+                          template={template}
+                          onApply={handleApplyTemplate}
+                          onDelete={handleDeleteTemplate}
+                          onEdit={handleEditTemplate}
+                          onExport={handleExportTemplate}
+                          onBatchApply={handleBatchApply}
+                          isRecent={true}
+                          showPreview={handlePreviewTemplate}
+                        />
+                      ))}
+                    </SimpleGrid>
+                  ) : (
+                    <Center style={{ height: 300 }}>
+                      <Stack align="center" gap="md">
+                        <IconClock size={48} color="#adb5bd" />
+                        <Stack gap={4} align="center">
+                          <Text fw={500} size="lg">
+                            暂无最近使用
+                          </Text>
+                          <Text size="sm" c="dimmed" ta="center" maw={300}>
+                            使用模板后，这里会显示你最近用过的模板
+                          </Text>
+                        </Stack>
+                      </Stack>
+                    </Center>
+                  )
+                ) : filteredTemplates.length > 0 ? (
+                  <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="md">
+                    {filteredTemplates.map((template) => {
+                      const similarity = sortBy === 'similarity'
+                        ? recommendations.find((r) => r.template.id === template.id)?.similarity
+                        : undefined;
+                      const matchLevel = sortBy === 'similarity'
+                        ? recommendations.find((r) => r.template.id === template.id)?.matchLevel
+                        : undefined;
+                      const isRecent = recentTemplateIds.includes(template.id);
+
+                      return (
+                        <TemplateCard
+                          key={template.id}
+                          template={template}
+                          onApply={handleApplyTemplate}
+                          onDelete={handleDeleteTemplate}
+                          onEdit={handleEditTemplate}
+                          onExport={handleExportTemplate}
+                          onBatchApply={handleBatchApply}
+                          similarity={similarity}
+                          matchLevel={matchLevel}
+                          isRecent={isRecent}
+                          showPreview={handlePreviewTemplate}
+                        />
+                      );
+                    })}
+                  </SimpleGrid>
+                ) : (
+                  <Center style={{ height: 300 }}>
+                    <Stack align="center" gap="md">
+                      <IconTemplate size={48} color="#adb5bd" />
+                      <Stack gap={4} align="center">
+                        <Text fw={500} size="lg">
+                          暂无模板
+                        </Text>
+                        <Text size="sm" c="dimmed" ta="center" maw={300}>
+                          {searchQuery || filterType !== 'all' || activeCategory !== '全部' || sceneFilter !== 'all'
+                            ? '没有找到匹配的模板，试试其他搜索条件'
+                            : '还没有保存任何模板，点击"保存当前设计"开始创建'}
+                        </Text>
+                      </Stack>
+                    </Stack>
+                  </Center>
+                )}
+              </ScrollArea>
             </Box>
           </Group>
 
-          <Group justify="space-between" mt="md" pt="md" style={{ borderTop: '1px solid #e9ecef' }}>
+          <Group justify="space-between" pt="md" style={{ borderTop: '1px solid #e9ecef' }}>
             <Text size="sm" c="dimmed">
-              共 {filteredTemplates.length} 个模板
+              共 {filteredTemplates.length} 个模板 · 最近使用 {recentTemplates.length} 个
             </Text>
             <Button variant="light" onClick={onClose}>
               关闭
@@ -342,6 +797,27 @@ export function TemplateLibraryModal({
         elements={elements}
         paper={paper}
         editingTemplate={editingTemplate}
+      />
+
+      <TemplatePreviewModal
+        opened={!!previewTemplate}
+        onClose={() => setPreviewTemplate(null)}
+        template={previewTemplate}
+        currentElements={elements}
+        currentPaper={paper}
+        onApply={handleApplyTemplate}
+        reasons={recommendations.find((r) => r.template.id === previewTemplate?.id)?.reasons}
+        matchLevel={recommendations.find((r) => r.template.id === previewTemplate?.id)?.matchLevel}
+      />
+
+      <BatchApplyModal
+        opened={batchModalOpened}
+        onClose={() => {
+          setBatchModalOpened(false);
+          setBatchTemplate(null);
+          loadTemplates();
+        }}
+        template={batchTemplate}
       />
     </>
   );

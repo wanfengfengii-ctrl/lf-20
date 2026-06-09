@@ -206,7 +206,114 @@ export interface DesignTemplate {
   createdAt: string;
   updatedAt: string;
   usageCount: number;
+  lastUsedAt?: string;
 }
+
+export interface TemplateSimilarity {
+  templateId: string;
+  overallScore: number;
+  paperSizeScore: number;
+  elementCountScore: number;
+  titleBodyRatioScore: number;
+  decorationDensityScore: number;
+  whitespaceScore: number;
+  colorSchemeScore: number;
+  fontStyleScore: number;
+}
+
+export interface RecommendationReason {
+  id: string;
+  title: string;
+  description: string;
+  type: 'match' | 'improvement' | 'style';
+}
+
+export interface TemplateRecommendation {
+  template: DesignTemplate;
+  similarity: TemplateSimilarity;
+  reasons: RecommendationReason[];
+  matchLevel: 'perfect' | 'high' | 'medium' | 'low';
+}
+
+export type SceneCategory =
+  | 'business_card'
+  | 'poster'
+  | 'flyer'
+  | 'invitation'
+  | 'letterhead'
+  | 'book_cover'
+  | 'social_media'
+  | 'other';
+
+export interface SceneDetectionResult {
+  scene: SceneCategory;
+  confidence: number;
+  indicators: string[];
+}
+
+export interface TemplateDiff {
+  elementChanges: {
+    added: string[];
+    removed: string[];
+    modified: {
+      elementId: string;
+      property: string;
+      oldValue: unknown;
+      newValue: unknown;
+    }[];
+  };
+  styleChanges: {
+    fontFamily?: { old: string; new: string };
+    titleFontSize?: { old: number; new: number };
+    bodyFontSize?: { old: number; new: number };
+    titleColor?: { old: string; new: string };
+    bodyColor?: { old: string; new: string };
+    backgroundColor?: { old: string; new: string };
+  };
+  paperChanges?: {
+    width?: { old: number; new: number };
+    height?: { old: number; new: number };
+    backgroundColor?: { old: string; new: string };
+  };
+  summary: {
+    totalChanges: number;
+    elementChanges: number;
+    styleChanges: number;
+    paperChanges: number;
+  };
+}
+
+export interface BatchApplyResult {
+  designId: string;
+  designName: string;
+  success: boolean;
+  error?: string;
+  elementsBefore: CanvasElement[];
+  elementsAfter: CanvasElement[];
+  paperBefore: PaperConfig;
+  paperAfter: PaperConfig;
+  diff: TemplateDiff;
+}
+
+export interface DesignItem {
+  id: string;
+  name: string;
+  paper: PaperConfig;
+  elements: CanvasElement[];
+  thumbnail?: string | null;
+  updatedAt: string;
+}
+
+export const SCENE_CATEGORIES: { value: SceneCategory; label: string; description: string }[] = [
+  { value: 'business_card', label: '名片', description: '个人或商务名片设计' },
+  { value: 'poster', label: '海报', description: '宣传海报、活动海报' },
+  { value: 'flyer', label: '传单', description: '宣传单页、DM单' },
+  { value: 'invitation', label: '邀请函', description: '活动邀请、请柬' },
+  { value: 'letterhead', label: '信纸', description: '办公信纸、抬头纸' },
+  { value: 'book_cover', label: '书籍封面', description: '书籍、杂志封面' },
+  { value: 'social_media', label: '社交媒体', description: '社交媒体配图' },
+  { value: 'other', label: '其他', description: '其他类型设计' },
+];
 
 export const TEMPLATE_CATEGORIES = [
   '全部',

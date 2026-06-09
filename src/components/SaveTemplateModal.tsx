@@ -4,7 +4,6 @@ import {
   TextInput,
   Textarea,
   Select,
-  Chip,
   Button,
   Group,
   Stack,
@@ -12,7 +11,9 @@ import {
   Box,
   Text,
   Badge,
+  ActionIcon,
 } from '@mantine/core';
+import { IconX } from '@tabler/icons-react';
 import type { TemplateType, DesignTemplate } from '../types';
 import { TEMPLATE_CATEGORIES } from '../types';
 import type { CanvasElement, PaperConfig } from '../types';
@@ -119,15 +120,18 @@ export function SaveTemplateModal({
           </Text>
           <Group gap="xs" mb="xs">
             {tags.map((tag) => (
-              <Chip
+              <Badge
                 key={tag}
                 size="sm"
-                defaultChecked
-                onRemove={() => handleRemoveTag(tag)}
                 variant="light"
+                rightSection={
+                  <ActionIcon size={14} variant="transparent" c="gray" onClick={() => handleRemoveTag(tag)}>
+                    <IconX size={10} />
+                  </ActionIcon>
+                }
               >
                 {tag}
-              </Chip>
+              </Badge>
             ))}
           </Group>
           <Group gap="xs">

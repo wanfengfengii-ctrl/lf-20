@@ -1,6 +1,6 @@
-import { Card, Badge, Text, Group, Stack, ActionIcon, Menu, Tooltip } from '@mantine/core';
-import { IconDots, IconTrash, IconDownload, IconEdit } from '@tabler/icons-react';
-import type { DesignTemplate } from '../types';
+import { Card, Badge, Text, Group, Stack, ActionIcon, Menu, Tooltip, Progress, Button } from '@mantine/core';
+import { IconDots, IconTrash, IconDownload, IconEdit, IconStar, IconClock, IconSparkles, IconCopy } from '@tabler/icons-react';
+import type { DesignTemplate, TemplateSimilarity } from '../types';
 
 interface TemplateCardProps {
   template: DesignTemplate;
@@ -8,6 +8,12 @@ interface TemplateCardProps {
   onDelete: (template: DesignTemplate) => void;
   onEdit?: (template: DesignTemplate) => void;
   onExport?: (template: DesignTemplate) => void;
+  onBatchApply?: (template: DesignTemplate) => void;
+  similarity?: TemplateSimilarity;
+  isRecommended?: boolean;
+  isRecent?: boolean;
+  matchLevel?: 'perfect' | 'high' | 'medium' | 'low';
+  showPreview?: (template: DesignTemplate) => void;
 }
 
 export function TemplateCard({
@@ -16,6 +22,12 @@ export function TemplateCard({
   onDelete,
   onEdit,
   onExport,
+  onBatchApply,
+  similarity,
+  isRecommended,
+  isRecent,
+  matchLevel,
+  showPreview,
 }: TemplateCardProps) {
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -24,6 +36,20 @@ export function TemplateCard({
       month: '2-digit',
       day: '2-digit',
     });
+  };
+
+  const matchLevelColors: Record<string, string> = {
+    perfect: 'green',
+    high: 'teal',
+    medium: 'yellow',
+    low: 'gray',
+  };
+
+  const matchLevelLabels: Record<string, string> = {
+    perfect: '完美匹配',
+    high: '高度匹配',
+    medium: '中等匹配',
+    low: '一般匹配',
   };
 
   return (
@@ -74,14 +100,42 @@ export function TemplateCard({
               {template.paper.width} × {template.paper.height}
             </div>
           )}
-          <Badge
-            size="xs"
-            color={template.type === 'full' ? 'blue' : 'violet'}
-            variant="light"
-            style={{ position: 'absolute', top: 8, left: 8 }}
-          >
-            {template.type === 'full' ? '完整模板' : '风格模板'}
-          </Badge>
+          <Group gap={4} style={{ position: 'absolute', top: 8, left: 8 }}>
+            <Badge
+              size="xs"
+              color={template.type === 'full' ? 'blue' : 'violet'}
+              variant="light"
+            >
+              {template.type === 'full' ? '完整模板' : '风格模板'}
+            </Badge>
+            {isRecommended && (
+              <Tooltip label="智能推荐">
+                <Badge size="xs" color="grape" variant="filled" leftSection={<IconSparkles size={10} />}>
+                  推荐
+                </Badge>
+              </Tooltip>
+            )}
+            {isRecent && (
+              <Tooltip label="最近使用">
+                <Badge size="xs" color="orange" variant="light" leftSection={<IconClock size={10} />}>
+                  最近
+                </Badge>
+              </Tooltip>
+            )}
+          </Group>
+          {similarity && matchLevel && (
+            <Tooltip label={`匹配度: ${similarity.overallScore}% - ${matchLevelLabels[matchLevel]}`}>
+              <Badge
+                size="xs"
+                color={matchLevelColors[matchLevel]}
+                variant="light"
+                style={{ position: 'absolute', top: 8, right: 8 }}
+                leftSection={<IconStar size={10} />}
+              >
+                {similarity.overallScore}%
+              </Badge>
+            </Tooltip>
+          )}
           <Menu shadow="md" width={120} withinPortal>
             <Menu.Target>
               <ActionIcon
@@ -119,6 +173,17 @@ export function TemplateCard({
                   导出模板
                 </Menu.Item>
               )}
+              {onBatchApply && (
+                <Menu.Item
+                  leftSection={<IconCopy size={14} />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onBatchApply(template);
+                  }}
+                >
+                  批量套用
+                </Menu.Item>
+              )}
               <Menu.Item
                 leftSection={<IconTrash size={14} />}
                 color="red"
@@ -150,6 +215,24 @@ export function TemplateCard({
           {template.description || '暂无描述'}
         </Text>
 
+        {similarity && (
+          <div style={{ marginTop: 4 }}>
+            <Group justify="space-between" mb={2}>
+              <Text size="xs" c="dimmed">
+                匹配度
+              </Text>
+              <Text size="xs" fw={500} c={matchLevelColors[matchLevel || 'low']}>
+                {similarity.overallScore}%
+              </Text>
+            </Group>
+            <Progress
+              value={similarity.overallScore}
+              size="xs"
+              color={matchLevelColors[matchLevel || 'low']}
+            />
+          </div>
+        )}
+
         <Group gap={4} mt={4}>
           <Badge size="xs" variant="outline" color="gray">
             {template.category}
@@ -165,6 +248,21 @@ export function TemplateCard({
             </Badge>
           )}
         </Group>
+
+        {showPreview && (
+          <Button
+            variant="subtle"
+            size="xs"
+            fullWidth
+            mt={4}
+            onClick={(e) => {
+              e.stopPropagation();
+              showPreview(template);
+            }}
+          >
+            预览效果
+          </Button>
+        )}
 
         <Text size="xs" c="dimmed" mt={4}>
           更新于 {formatDate(template.updatedAt)}

@@ -9,6 +9,7 @@ import {
   IconZoomIn,
   IconZoomOut,
   IconTemplate,
+  IconFilePlus,
 } from '@tabler/icons-react';
 
 interface ToolbarProps {
@@ -19,6 +20,7 @@ interface ToolbarProps {
   onExport: () => void;
   onImport: () => void;
   onOpenTemplates: () => void;
+  onSaveToLibrary: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
@@ -34,6 +36,7 @@ export function Toolbar({
   onExport,
   onImport,
   onOpenTemplates,
+  onSaveToLibrary,
   onZoomIn,
   onZoomOut,
   onZoomReset,
@@ -76,6 +79,12 @@ export function Toolbar({
       <Tooltip label="模板库">
         <Button leftSection={<IconTemplate size={16} />} variant="light" onClick={onOpenTemplates} size="sm">
           模板库
+        </Button>
+      </Tooltip>
+
+      <Tooltip label="保存到设计库">
+        <Button leftSection={<IconFilePlus size={16} />} variant="light" onClick={onSaveToLibrary} size="sm">
+          存为设计稿
         </Button>
       </Tooltip>
 

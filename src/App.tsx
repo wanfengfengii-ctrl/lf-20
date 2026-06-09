@@ -31,8 +31,8 @@ import { generateId, clamp } from './utils/helpers';
 import { analyzeLayout, diagnoseLayout } from './utils/layoutAnalysis';
 import { runAllValidations, validateTextOverlap } from './utils/validation';
 import { optimizeLayout, optimizeForPaperSize } from './utils/layoutOptimizer';
-import { importDesign, downloadDesignFile } from './utils/designStorage';
-import { applyTemplateToNewDesign, applyTemplate } from './utils/templateStorage';
+import { importDesign, downloadDesignFile, saveDesignToLibrary } from './utils/designStorage';
+import { generateTemplateThumbnail, applyTemplateToNewDesign } from './utils/templateStorage';
 import type { DesignTemplate } from './types';
 
 const DEFAULT_PAPER: PaperConfig = {
@@ -484,6 +484,27 @@ function App() {
     setTemplateModalOpened(true);
   }, []);
 
+  const handleSaveToLibrary = useCallback(async () => {
+    const name = window.prompt('请输入设计稿名称:', `设计稿 ${new Date().toLocaleDateString('zh-CN')}`);
+    if (!name) return;
+
+    try {
+      const thumbnail = await generateTemplateThumbnail(elements, paper);
+      saveDesignToLibrary(elements, paper, { name, thumbnail });
+      notifications.show({
+        title: '已保存到设计库',
+        message: `"${name}" 已保存，可在批量套用时使用`,
+        color: 'green',
+      });
+    } catch (e) {
+      notifications.show({
+        title: '保存失败',
+        message: '保存到设计库时出错',
+        color: 'red',
+      });
+    }
+  }, [elements, paper]);
+
   const handleApplyTemplate = useCallback(
     (template: DesignTemplate) => {
       const beforeElements = [...elements];
@@ -618,6 +639,7 @@ function App() {
             onExport={handleExport}
             onImport={handleImport}
             onOpenTemplates={handleOpenTemplates}
+            onSaveToLibrary={handleSaveToLibrary}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onZoomReset={handleZoomReset}

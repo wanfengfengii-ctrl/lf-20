@@ -1,6 +1,18 @@
-import type { CanvasElement, DesignData, PaperConfig } from '../types';
+import type { CanvasElement, DesignData, PaperConfig, DesignItem } from '../types';
+import { generateId } from './helpers';
 
 const EXPORT_VERSION = '1.0.0';
+const DESIGNS_STORAGE_KEY = 'typography_designs';
+
+export interface SavedDesign {
+  id: string;
+  name: string;
+  paper: PaperConfig;
+  elements: CanvasElement[];
+  createdAt: string;
+  updatedAt: string;
+  thumbnail?: string | null;
+}
 
 const VALID_TYPES = ['text', 'lead', 'decoration'] as const;
 const VALID_DECORATION_SHAPES = ['line', 'circle', 'rect', 'diamond'] as const;
@@ -162,4 +174,93 @@ export function downloadDesignFile(
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function getDesignsFromStorage(): SavedDesign[] {
+  try {
+    const stored = localStorage.getItem(DESIGNS_STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.error('Failed to load designs from storage:', e);
+  }
+  return [];
+}
+
+function saveDesignsToStorage(designs: SavedDesign[]): void {
+  try {
+    localStorage.setItem(DESIGNS_STORAGE_KEY, JSON.stringify(designs));
+  } catch (e) {
+    console.error('Failed to save designs to storage:', e);
+  }
+}
+
+export function saveDesignToLibrary(
+  elements: CanvasElement[],
+  paper: PaperConfig,
+  options: { name: string; thumbnail?: string | null }
+): SavedDesign {
+  const designs = getDesignsFromStorage();
+  const now = new Date().toISOString();
+
+  const design: SavedDesign = {
+    id: generateId(),
+    name: options.name,
+    paper: { ...paper },
+    elements: elements.map((el) => ({ ...el })),
+    createdAt: now,
+    updatedAt: now,
+    thumbnail: options.thumbnail || null,
+  };
+
+  designs.push(design);
+  saveDesignsToStorage(designs);
+  return design;
+}
+
+export function getAllDesigns(): SavedDesign[] {
+  return getDesignsFromStorage();
+}
+
+export function getDesignById(id: string): SavedDesign | null {
+  const designs = getDesignsFromStorage();
+  return designs.find((d) => d.id === id) || null;
+}
+
+export function updateDesignInLibrary(
+  id: string,
+  updates: Partial<SavedDesign>
+): SavedDesign | null {
+  const designs = getDesignsFromStorage();
+  const index = designs.findIndex((d) => d.id === id);
+
+  if (index < 0) return null;
+
+  designs[index] = {
+    ...designs[index],
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  };
+
+  saveDesignsToStorage(designs);
+  return designs[index];
+}
+
+export function deleteDesignFromLibrary(id: string): void {
+  const designs = getDesignsFromStorage();
+  const filtered = designs.filter((d) => d.id !== id);
+  saveDesignsToStorage(filtered);
+}
+
+export function getDesignItems(): DesignItem[] {
+  const designs = getDesignsFromStorage();
+  return designs.map((d) => ({
+    id: d.id,
+    name: d.name,
+    paper: d.paper,
+    elements: d.elements,
+    thumbnail: d.thumbnail,
+    updatedAt: d.updatedAt,
+  }));
 }
