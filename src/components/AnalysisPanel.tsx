@@ -386,7 +386,7 @@ export function DiagnosisPanel({
         <Divider />
 
         <Group grow>
-          <Tooltip label="撤销上一步优化">
+          <Tooltip label="撤销上一步操作">
             <Button
               variant="light"
               leftSection={<IconArrowBackUp size={16} />}
@@ -397,7 +397,7 @@ export function DiagnosisPanel({
               撤销
             </Button>
           </Tooltip>
-          <Tooltip label="重做已撤销的优化">
+          <Tooltip label="重做已撤销的操作">
             <Button
               variant="light"
               leftSection={<IconArrowForwardUp size={16} />}
@@ -411,16 +411,16 @@ export function DiagnosisPanel({
         </Group>
 
         <Group grow>
-          <Tooltip label={showPreview ? '显示当前版本' : '预览优化效果'}>
+          <Tooltip label={showPreview ? '关闭对比视图，返回编辑' : '并排查看优化前后效果'}>
             <Button
               variant="light"
-              color={showPreview ? 'blue' : 'gray'}
+              color={showPreview ? 'violet' : 'gray'}
               leftSection={showPreview ? <IconEye size={16} /> : <IconEyeOff size={16} />}
               onClick={() => onTogglePreview(!showPreview)}
-              disabled={!canUndo}
+              disabled={!isOptimized}
               size="sm"
             >
-              {showPreview ? '优化后' : '优化前'}
+              {showPreview ? '对比中' : '对比视图'}
             </Button>
           </Tooltip>
         </Group>

@@ -83,13 +83,18 @@ export interface OptimizationResult {
   description: string;
 }
 
-export interface OptimizationHistoryEntry {
+export type HistoryActionType = 'add' | 'delete' | 'modify' | 'optimize' | 'paper_change' | 'import';
+
+export interface HistoryEntry {
   id: string;
   timestamp: number;
+  type: HistoryActionType;
+  description: string;
   beforeElements: CanvasElement[];
   afterElements: CanvasElement[];
-  changedElementIds: string[];
-  description: string;
+  beforePaper?: PaperConfig;
+  afterPaper?: PaperConfig;
+  changedElementIds?: string[];
 }
 
 export type PaperSizeCategory = 'business_card' | 'small' | 'medium' | 'large' | 'poster';

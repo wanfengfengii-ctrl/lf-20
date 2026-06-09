@@ -23,6 +23,7 @@ interface FabricCanvasProps {
   onElementSelect: (id: string | null) => void;
   onElementMove: (id: string, x: number, y: number) => void;
   onElementModify: (id: string, updates: Partial<CanvasElement>) => void;
+  onModifyStart?: () => void;
   scale: number;
 }
 
@@ -33,6 +34,7 @@ export function FabricCanvas({
   onElementSelect,
   onElementMove,
   onElementModify,
+  onModifyStart,
   scale,
 }: FabricCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -298,6 +300,18 @@ export function FabricCanvas({
     fabricCanvasRef.current = canvas;
 
     let lastValidPosition = { left: 0, top: 0 };
+    let isModifyingRef = false;
+
+    const triggerModifyStart = () => {
+      if (!isModifyingRef) {
+        isModifyingRef = true;
+        onModifyStart?.();
+      }
+    };
+
+    const triggerModifyEnd = () => {
+      isModifyingRef = false;
+    };
 
     const updateLastValid = (obj: FabricObject) => {
       lastValidPosition = {
@@ -339,6 +353,7 @@ export function FabricCanvas({
       const obj = e.target as FabricObject;
       if (!obj) return;
 
+      triggerModifyStart();
       constrainToBounds(obj);
 
       if (checkTextOverlap(obj)) {
@@ -362,6 +377,7 @@ export function FabricCanvas({
       const obj = e.target as FabricObject;
       if (!obj) return;
 
+      triggerModifyStart();
       constrainToBounds(obj);
     });
 
@@ -370,6 +386,7 @@ export function FabricCanvas({
       const obj = e.target as FabricObject;
       if (!obj) return;
 
+      triggerModifyEnd();
       const data = getElementData(obj);
       if (!data?.id) return;
 

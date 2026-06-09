@@ -24,7 +24,7 @@ import type {
   ValidationIssue,
   LayoutAnalysis,
   LayoutDiagnosis,
-  OptimizationHistoryEntry,
+  HistoryEntry,
 } from './types';
 import { generateId, clamp } from './utils/helpers';
 import { analyzeLayout, diagnoseLayout } from './utils/layoutAnalysis';
@@ -38,7 +38,7 @@ const DEFAULT_PAPER: PaperConfig = {
   backgroundColor: '#ffffff',
 };
 
-const MAX_HISTORY_SIZE = 20;
+const MAX_HISTORY_SIZE = 50;
 
 function App() {
   const theme = useMantineTheme();
@@ -48,9 +48,11 @@ function App() {
   const [zoom, setZoom] = useState(0.8);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [optimizationHistory, setOptimizationHistory] = useState<OptimizationHistoryEntry[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [showOptimizedPreview, setShowOptimizedPreview] = useState(false);
+  const [showCompareView, setShowCompareView] = useState(false);
+  const isProgrammaticChangeRef = useRef(false);
+  const elementsBeforeModifyRef = useRef<CanvasElement[] | null>(null);
 
   const prevPaperRef = useRef<PaperConfig>(paper);
 
@@ -58,39 +60,52 @@ function App() {
     return elements.find((e) => e.id === selectedId) || null;
   }, [elements, selectedId]);
 
-  const displayElements = useMemo(() => {
-    if (showOptimizedPreview && historyIndex >= 0 && historyIndex < optimizationHistory.length) {
-      return optimizationHistory[historyIndex].afterElements;
-    }
-    return elements;
-  }, [showOptimizedPreview, elements, optimizationHistory, historyIndex]);
-
   const layoutAnalysis: LayoutAnalysis = useMemo(() => {
-    return analyzeLayout(displayElements, paper);
-  }, [displayElements, paper]);
+    return analyzeLayout(elements, paper);
+  }, [elements, paper]);
 
   const validationIssues: ValidationIssue[] = useMemo(() => {
-    return runAllValidations(displayElements, paper);
-  }, [displayElements, paper]);
+    return runAllValidations(elements, paper);
+  }, [elements, paper]);
 
   const layoutDiagnosis: LayoutDiagnosis = useMemo(() => {
-    return diagnoseLayout(displayElements, paper);
-  }, [displayElements, paper]);
-
-  const optimizedDiagnosis: LayoutDiagnosis | undefined = useMemo(() => {
-    if (historyIndex >= 0 && historyIndex < optimizationHistory.length) {
-      return diagnoseLayout(optimizationHistory[historyIndex].afterElements, paper);
-    }
-    return undefined;
-  }, [optimizationHistory, historyIndex, paper]);
+    return diagnoseLayout(elements, paper);
+  }, [elements, paper]);
 
   const canUndo = historyIndex >= 0;
-  const canRedo = historyIndex < optimizationHistory.length - 1;
+  const canRedo = historyIndex < history.length - 1;
 
-  const pushOptimizationHistory = useCallback((entry: OptimizationHistoryEntry) => {
-    setOptimizationHistory((prev) => {
+  const lastOptimizeEntry = useMemo(() => {
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].type === 'optimize') {
+        return history[i];
+      }
+    }
+    return null;
+  }, [history]);
+
+  const compareBeforeElements = useMemo(() => {
+    if (!showCompareView || !lastOptimizeEntry) return null;
+    return lastOptimizeEntry.beforeElements;
+  }, [showCompareView, lastOptimizeEntry]);
+
+  const compareAfterElements = useMemo(() => {
+    if (!showCompareView || !lastOptimizeEntry) return null;
+    return lastOptimizeEntry.afterElements;
+  }, [showCompareView, lastOptimizeEntry]);
+
+  const pushHistory = useCallback((entry: Omit<HistoryEntry, 'id' | 'timestamp'>) => {
+    if (isProgrammaticChangeRef.current) return;
+
+    const fullEntry: HistoryEntry = {
+      ...entry,
+      id: generateId(),
+      timestamp: Date.now(),
+    };
+
+    setHistory((prev) => {
       const trimmed = prev.slice(0, historyIndex + 1);
-      const updated = [...trimmed, entry];
+      const updated = [...trimmed, fullEntry];
       if (updated.length > MAX_HISTORY_SIZE) {
         return updated.slice(updated.length - MAX_HISTORY_SIZE);
       }
@@ -99,7 +114,63 @@ function App() {
     setHistoryIndex((prev) => Math.min(prev + 1, MAX_HISTORY_SIZE - 1));
   }, [historyIndex]);
 
+  const handleUndo = useCallback(() => {
+    if (!canUndo) return;
+
+    const entry = history[historyIndex];
+    if (!entry) return;
+
+    isProgrammaticChangeRef.current = true;
+
+    setElements(entry.beforeElements);
+
+    if (entry.beforePaper) {
+      setPaper(entry.beforePaper);
+      prevPaperRef.current = entry.beforePaper;
+    }
+
+    setHistoryIndex((prev) => prev - 1);
+    setShowCompareView(false);
+
+    isProgrammaticChangeRef.current = false;
+
+    notifications.show({
+      title: '已撤销',
+      message: entry.description,
+      color: 'blue',
+    });
+  }, [canUndo, history, historyIndex]);
+
+  const handleRedo = useCallback(() => {
+    if (!canRedo) return;
+
+    const nextIndex = historyIndex + 1;
+    const entry = history[nextIndex];
+    if (!entry) return;
+
+    isProgrammaticChangeRef.current = true;
+
+    setElements(entry.afterElements);
+
+    if (entry.afterPaper) {
+      setPaper(entry.afterPaper);
+      prevPaperRef.current = entry.afterPaper;
+    }
+
+    setHistoryIndex(nextIndex);
+    setShowCompareView(false);
+
+    isProgrammaticChangeRef.current = false;
+
+    notifications.show({
+      title: '已重做',
+      message: entry.description,
+      color: 'blue',
+    });
+  }, [canRedo, history, historyIndex]);
+
   const handleOptimize = useCallback(() => {
+    const beforeElements = [...elements];
     const result = optimizeLayout(elements, paper);
 
     if (result.changedElementIds.length === 0) {
@@ -111,66 +182,29 @@ function App() {
       return;
     }
 
-    const entry: OptimizationHistoryEntry = {
-      id: generateId(),
-      timestamp: Date.now(),
-      beforeElements: [...elements],
+    pushHistory({
+      type: 'optimize',
+      description: result.description,
+      beforeElements,
       afterElements: result.elements,
       changedElementIds: result.changedElementIds,
-      description: result.description,
-    };
+    });
 
-    pushOptimizationHistory(entry);
     setElements(result.elements);
-    setShowOptimizedPreview(false);
 
     notifications.show({
       title: '优化完成',
       message: result.description,
       color: 'green',
     });
-  }, [elements, paper, pushOptimizationHistory]);
+  }, [elements, paper, pushHistory]);
 
-  const handleUndo = useCallback(() => {
-    if (!canUndo) return;
-
-    const entry = optimizationHistory[historyIndex];
-    if (entry) {
-      setElements(entry.beforeElements);
-      setHistoryIndex((prev) => prev - 1);
-      setShowOptimizedPreview(false);
-
-      notifications.show({
-        title: '已撤销',
-        message: '已恢复到优化前的状态',
-        color: 'blue',
-      });
-    }
-  }, [canUndo, optimizationHistory, historyIndex]);
-
-  const handleRedo = useCallback(() => {
-    if (!canRedo) return;
-
-    const nextIndex = historyIndex + 1;
-    const entry = optimizationHistory[nextIndex];
-    if (entry) {
-      setElements(entry.afterElements);
-      setHistoryIndex(nextIndex);
-      setShowOptimizedPreview(false);
-
-      notifications.show({
-        title: '已重做',
-        message: entry.description,
-        color: 'blue',
-      });
-    }
-  }, [canRedo, optimizationHistory, historyIndex]);
-
-  const handleTogglePreview = useCallback((show: boolean) => {
-    setShowOptimizedPreview(show);
+  const handleToggleCompare = useCallback((show: boolean) => {
+    setShowCompareView(show);
   }, []);
 
   const handleAddText = useCallback(() => {
+    const beforeElements = [...elements];
     const newElement: TextElement = {
       id: generateId(),
       type: 'text',
@@ -187,13 +221,23 @@ function App() {
       textAlign: 'left',
       fill: '#333333',
     };
-    setElements((prev) => [...prev, newElement]);
+    const afterElements = [...beforeElements, newElement];
+
+    pushHistory({
+      type: 'add',
+      description: '添加文字块',
+      beforeElements,
+      afterElements,
+      changedElementIds: [newElement.id],
+    });
+
+    setElements(afterElements);
     setSelectedId(newElement.id);
-    setOptimizationHistory([]);
-    setHistoryIndex(-1);
-  }, [elements.length]);
+    setShowCompareView(false);
+  }, [elements, pushHistory]);
 
   const handleAddLead = useCallback(() => {
+    const beforeElements = [...elements];
     const newElement: LeadElement = {
       id: generateId(),
       type: 'lead',
@@ -204,13 +248,23 @@ function App() {
       rotation: 0,
       fill: '#333333',
     };
-    setElements((prev) => [...prev, newElement]);
+    const afterElements = [...beforeElements, newElement];
+
+    pushHistory({
+      type: 'add',
+      description: '添加铅条',
+      beforeElements,
+      afterElements,
+      changedElementIds: [newElement.id],
+    });
+
+    setElements(afterElements);
     setSelectedId(newElement.id);
-    setOptimizationHistory([]);
-    setHistoryIndex(-1);
-  }, [elements.length]);
+    setShowCompareView(false);
+  }, [elements, pushHistory]);
 
   const handleAddDecoration = useCallback(() => {
+    const beforeElements = [...elements];
     const newElement: DecorationElement = {
       id: generateId(),
       type: 'decoration',
@@ -224,28 +278,54 @@ function App() {
       strokeWidth: 2,
       strokeColor: '#333333',
     };
-    setElements((prev) => [...prev, newElement]);
+    const afterElements = [...beforeElements, newElement];
+
+    pushHistory({
+      type: 'add',
+      description: '添加装饰元素',
+      beforeElements,
+      afterElements,
+      changedElementIds: [newElement.id],
+    });
+
+    setElements(afterElements);
     setSelectedId(newElement.id);
-    setOptimizationHistory([]);
-    setHistoryIndex(-1);
-  }, [elements.length]);
+    setShowCompareView(false);
+  }, [elements, pushHistory]);
 
   const handleDeleteSelected = useCallback(() => {
     if (!selectedId) return;
-    setElements((prev) => prev.filter((e) => e.id !== selectedId));
+
+    const beforeElements = [...elements];
+    const afterElements = beforeElements.filter((e) => e.id !== selectedId);
+
+    pushHistory({
+      type: 'delete',
+      description: '删除选中元素',
+      beforeElements,
+      afterElements,
+      changedElementIds: [selectedId],
+    });
+
+    setElements(afterElements);
     setSelectedId(null);
-    setOptimizationHistory([]);
-    setHistoryIndex(-1);
+    setShowCompareView(false);
+
     notifications.show({
       title: '已删除',
       message: '选中的元素已被删除',
       color: 'blue',
     });
-  }, [selectedId]);
+  }, [selectedId, elements, pushHistory]);
 
   const handleElementSelect = useCallback((id: string | null) => {
     setSelectedId(id);
   }, []);
+
+  const handleModifyStart = useCallback(() => {
+    if (isProgrammaticChangeRef.current) return;
+    elementsBeforeModifyRef.current = [...elements];
+  }, [elements]);
 
   const handleElementMove = useCallback((id: string, x: number, y: number) => {
     setElements((prev) =>
@@ -254,57 +334,78 @@ function App() {
   }, []);
 
   const handleElementModify = useCallback((id: string, updates: Partial<CanvasElement>) => {
-    setElements((prev) =>
-      prev.map((el) => {
-        if (el.id !== id) return el;
-        if (el.type === 'text') {
-          return { ...el, ...updates } as TextElement;
-        } else if (el.type === 'lead') {
-          return { ...el, ...updates } as LeadElement;
-        } else {
-          return { ...el, ...updates } as DecorationElement;
-        }
-      })
-    );
-  }, []);
+    const beforeElements = elementsBeforeModifyRef.current || [...elements];
+    const afterElements = beforeElements.map((el) => {
+      if (el.id !== id) return el;
+      if (el.type === 'text') {
+        return { ...el, ...updates } as TextElement;
+      } else if (el.type === 'lead') {
+        return { ...el, ...updates } as LeadElement;
+      } else {
+        return { ...el, ...updates } as DecorationElement;
+      }
+    });
+
+    pushHistory({
+      type: 'modify',
+      description: '修改元素',
+      beforeElements,
+      afterElements,
+      changedElementIds: [id],
+    });
+
+    setElements(afterElements);
+    elementsBeforeModifyRef.current = null;
+    setShowCompareView(false);
+  }, [elements, pushHistory]);
 
   const handleUpdateElement = useCallback((id: string, updates: Partial<CanvasElement>) => {
-    setElements((prev) => {
-      const element = prev.find((el) => el.id === id);
-      if (!element) return prev;
+    const element = elements.find((el) => el.id === id);
+    if (!element) return;
 
-      const updated = { ...element, ...updates } as CanvasElement;
+    const updated = { ...element, ...updates } as CanvasElement;
 
-      if (updated.type === 'text') {
-        const textEl = updated as TextElement;
-        if (textEl.fontSize <= 0) return prev;
+    if (updated.type === 'text') {
+      const textEl = updated as TextElement;
+      if (textEl.fontSize <= 0) return;
+    }
+    if (updated.width <= 0 || updated.height <= 0) return;
+
+    updated.x = clamp(updated.x, 0, paper.width - updated.width);
+    updated.y = clamp(updated.y, 0, paper.height - updated.height);
+
+    if (updated.type === 'text') {
+      const otherElements = elements.filter((el) => el.id !== id);
+      const testElements = [...otherElements, updated];
+      const overlapIssues = validateTextOverlap(testElements);
+      if (overlapIssues.length > 0) {
+        return;
       }
-      if (updated.width <= 0 || updated.height <= 0) return prev;
+    }
 
-      updated.x = clamp(updated.x, 0, paper.width - updated.width);
-      updated.y = clamp(updated.y, 0, paper.height - updated.height);
-
-      if (updated.type === 'text') {
-        const otherElements = prev.filter((el) => el.id !== id);
-        const testElements = [...otherElements, updated];
-        const overlapIssues = validateTextOverlap(testElements);
-        if (overlapIssues.length > 0) {
-          return prev;
-        }
+    const beforeElements = [...elements];
+    const afterElements = beforeElements.map((el) => {
+      if (el.id !== id) return el;
+      if (el.type === 'text') {
+        return { ...el, ...updated } as TextElement;
+      } else if (el.type === 'lead') {
+        return { ...el, ...updated } as LeadElement;
+      } else {
+        return { ...el, ...updated } as DecorationElement;
       }
-
-      return prev.map((el) => {
-        if (el.id !== id) return el;
-        if (el.type === 'text') {
-          return { ...el, ...updated } as TextElement;
-        } else if (el.type === 'lead') {
-          return { ...el, ...updated } as LeadElement;
-        } else {
-          return { ...el, ...updated } as DecorationElement;
-        }
-      });
     });
-  }, [paper.width, paper.height]);
+
+    pushHistory({
+      type: 'modify',
+      description: '修改元素属性',
+      beforeElements,
+      afterElements,
+      changedElementIds: [id],
+    });
+
+    setElements(afterElements);
+    setShowCompareView(false);
+  }, [elements, paper.width, paper.height, pushHistory]);
 
   const handleUpdatePaper = useCallback((newPaper: PaperConfig) => {
     const oldPaper = prevPaperRef.current;
@@ -313,12 +414,21 @@ function App() {
       (newPaper.width !== oldPaper.width || newPaper.height !== oldPaper.height) &&
       elements.length > 0
     ) {
+      const beforeElements = [...elements];
       const result = optimizeForPaperSize(elements, oldPaper, newPaper);
+
+      pushHistory({
+        type: 'paper_change',
+        description: result.description,
+        beforeElements,
+        afterElements: result.elements,
+        beforePaper: oldPaper,
+        afterPaper: newPaper,
+      });
 
       setPaper(newPaper);
       setElements(result.elements);
-      setOptimizationHistory([]);
-      setHistoryIndex(-1);
+      setShowCompareView(false);
 
       const issues = runAllValidations(result.elements, newPaper);
       const overflowIssues = issues.filter((i) => i.type === 'overflow');
@@ -337,11 +447,20 @@ function App() {
         });
       }
     } else {
+      const oldPaperCopy = { ...oldPaper };
+      pushHistory({
+        type: 'paper_change',
+        description: '修改纸张设置',
+        beforeElements: [...elements],
+        afterElements: [...elements],
+        beforePaper: oldPaperCopy,
+        afterPaper: newPaper,
+      });
       setPaper(newPaper);
     }
 
     prevPaperRef.current = newPaper;
-  }, [elements]);
+  }, [elements, pushHistory]);
 
   const handleExport = useCallback(() => {
     const timestamp = new Date().toISOString().slice(0, 10);
@@ -367,12 +486,26 @@ function App() {
       const data = importDesign(content);
 
       if (data) {
+        const beforeElements = [...elements];
+        const beforePaper = { ...paper };
+
         setElements(data.elements);
         setPaper(data.paper);
         prevPaperRef.current = data.paper;
         setSelectedId(null);
-        setOptimizationHistory([]);
+        setHistory([]);
         setHistoryIndex(-1);
+        setShowCompareView(false);
+
+        pushHistory({
+          type: 'import',
+          description: `导入设计文件 (${data.elements.length} 个元素)`,
+          beforeElements,
+          afterElements: data.elements,
+          beforePaper,
+          afterPaper: data.paper,
+        });
+
         notifications.show({
           title: '导入成功',
           message: `成功导入 ${data.elements.length} 个元素`,
@@ -381,7 +514,7 @@ function App() {
       } else {
         notifications.show({
           title: '导入失败',
-          message: '文件格式不正确或已损坏',
+          message: '文件格式不正确或数据不完整',
           color: 'red',
         });
       }
@@ -389,7 +522,7 @@ function App() {
     reader.readAsText(file);
 
     e.target.value = '';
-  }, []);
+  }, [elements, paper, pushHistory]);
 
   const handleZoomIn = useCallback(() => {
     setZoom((prev) => Math.min(prev * 1.2, 3));
@@ -403,7 +536,7 @@ function App() {
     setZoom(0.8);
   }, []);
 
-  const isOptimizedState = canUndo;
+  const hasOptimizeHistory = lastOptimizeEntry !== null;
 
   return (
     <AppShell
@@ -432,9 +565,9 @@ function App() {
             <Title order={3} c="dark">
               活版印刷工作室
             </Title>
-            {showOptimizedPreview && (
-              <Badge color="blue" variant="light" size="lg">
-                预览优化效果
+            {showCompareView && (
+              <Badge color="violet" variant="light" size="lg">
+                优化前后对比视图
               </Badge>
             )}
           </Group>
@@ -473,26 +606,77 @@ function App() {
             overflow: 'auto',
             padding: theme.spacing.xl,
             background: theme.colors.gray[2],
+            gap: theme.spacing.lg,
           }}
         >
-          <Box
-            style={{
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
-              borderRadius: 4,
-              overflow: 'hidden',
-              transition: 'box-shadow 0.3s',
-            }}
-          >
-            <FabricCanvas
-              paper={paper}
-              elements={displayElements}
-              selectedId={selectedId}
-              onElementSelect={handleElementSelect}
-              onElementMove={handleElementMove}
-              onElementModify={handleElementModify}
-              scale={zoom}
-            />
-          </Box>
+          {showCompareView && compareBeforeElements && compareAfterElements ? (
+            <>
+              <Box style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: theme.spacing.sm }}>
+                <Badge color="gray" variant="light" size="lg">
+                  优化前
+                </Badge>
+                <Box
+                  style={{
+                    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+                    borderRadius: 4,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <FabricCanvas
+                    paper={paper}
+                    elements={compareBeforeElements}
+                    selectedId={null}
+                    onElementSelect={() => {}}
+                    onElementMove={() => {}}
+                    onElementModify={() => {}}
+                    scale={zoom}
+                  />
+                </Box>
+              </Box>
+              <Box style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: theme.spacing.sm }}>
+                <Badge color="green" variant="light" size="lg">
+                  优化后
+                </Badge>
+                <Box
+                  style={{
+                    boxShadow: '0 4px 20px rgba(0, 120, 0, 0.25)',
+                    borderRadius: 4,
+                    overflow: 'hidden',
+                    outline: `3px solid ${theme.colors.green[5]}`,
+                  }}
+                >
+                  <FabricCanvas
+                    paper={paper}
+                    elements={compareAfterElements}
+                    selectedId={null}
+                    onElementSelect={() => {}}
+                    onElementMove={() => {}}
+                    onElementModify={() => {}}
+                    scale={zoom}
+                  />
+                </Box>
+              </Box>
+            </>
+          ) : (
+            <Box
+              style={{
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+                borderRadius: 4,
+                overflow: 'hidden',
+              }}
+            >
+              <FabricCanvas
+                paper={paper}
+                elements={elements}
+                selectedId={selectedId}
+                onElementSelect={handleElementSelect}
+                onElementMove={handleElementMove}
+                onElementModify={handleElementModify}
+                onModifyStart={handleModifyStart}
+                scale={zoom}
+              />
+            </Box>
+          )}
         </Box>
       </AppShell.Main>
 
@@ -506,10 +690,10 @@ function App() {
               canRedo={canRedo}
               onUndo={handleUndo}
               onRedo={handleRedo}
-              showPreview={showOptimizedPreview}
-              onTogglePreview={handleTogglePreview}
-              isOptimized={isOptimizedState}
-              optimizedScore={optimizedDiagnosis?.overallScore}
+              showPreview={showCompareView}
+              onTogglePreview={handleToggleCompare}
+              isOptimized={hasOptimizeHistory}
+              optimizedScore={lastOptimizeEntry ? diagnoseLayout(lastOptimizeEntry.afterElements, paper).overallScore : undefined}
             />
             <AnalysisPanel analysis={layoutAnalysis} />
             <IssuesPanel issues={validationIssues} />
