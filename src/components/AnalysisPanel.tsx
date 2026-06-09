@@ -1,6 +1,37 @@
-import { Paper, Title, Stack, Alert, Group, Text, Badge } from '@mantine/core';
-import { IconAlertCircle, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
-import type { ValidationIssue, LayoutAnalysis } from '../types';
+import {
+  Paper,
+  Title,
+  Stack,
+  Alert,
+  Group,
+  Text,
+  Badge,
+  Button,
+  Accordion,
+  Progress,
+  Box,
+  Divider,
+  Tooltip,
+} from '@mantine/core';
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconCircleCheck,
+  IconWand,
+  IconArrowBackUp,
+  IconArrowForwardUp,
+  IconEye,
+  IconEyeOff,
+  IconBulb,
+  IconArrowUpRight,
+  IconChartBar,
+} from '@tabler/icons-react';
+import type {
+  ValidationIssue,
+  LayoutAnalysis,
+  LayoutDiagnosis,
+  DiagnosisSuggestion,
+} from '../types';
 
 interface IssuesPanelProps {
   issues: ValidationIssue[];
@@ -68,7 +99,12 @@ export function AnalysisPanel({ analysis }: AnalysisPanelProps) {
 
   return (
     <Paper p="md" withBorder>
-      <Title order={4} mb="md">版面分析</Title>
+      <Group justify="space-between" mb="md">
+        <Title order={4}>版面分析</Title>
+        <Badge variant="light" leftSection={<IconChartBar size={12} />}>
+          实时
+        </Badge>
+      </Group>
 
       <Stack gap="md">
         <div>
@@ -78,22 +114,11 @@ export function AnalysisPanel({ analysis }: AnalysisPanelProps) {
               {analysis.balanceScore.toFixed(1)} 分
             </Text>
           </Group>
-          <div style={{ height: 6, background: '#e9ecef', borderRadius: 3 }}>
-            <div
-              style={{
-                height: '100%',
-                width: `${analysis.balanceScore}%`,
-                background:
-                  analysis.balanceScore >= 70
-                    ? '#40c057'
-                    : analysis.balanceScore >= 40
-                    ? '#fab005'
-                    : '#ff6b6b',
-                borderRadius: 3,
-                transition: 'all 0.3s',
-              }}
-            />
-          </div>
+          <Progress
+            value={analysis.balanceScore}
+            color={getBalanceColor()}
+            size="sm"
+          />
         </div>
 
         <div>
@@ -103,22 +128,11 @@ export function AnalysisPanel({ analysis }: AnalysisPanelProps) {
               {(analysis.textDensity * 100).toFixed(1)}%
             </Text>
           </Group>
-          <div style={{ height: 6, background: '#e9ecef', borderRadius: 3 }}>
-            <div
-              style={{
-                height: '100%',
-                width: `${Math.min(analysis.textDensity * 100, 100)}%`,
-                background:
-                  analysis.textDensity > 0.6
-                    ? '#ff6b6b'
-                    : analysis.textDensity > 0.4
-                    ? '#fab005'
-                    : '#40c057',
-                borderRadius: 3,
-                transition: 'all 0.3s',
-              }}
-            />
-          </div>
+          <Progress
+            value={Math.min(analysis.textDensity * 100, 100)}
+            color={getDensityColor()}
+            size="sm"
+          />
         </div>
 
         <Group grow>
@@ -158,6 +172,8 @@ export function AnalysisPanel({ analysis }: AnalysisPanelProps) {
             </Text>
           </div>
         </Group>
+
+        <Divider />
 
         <Group grow>
           <div>
@@ -215,6 +231,261 @@ export function AnalysisPanel({ analysis }: AnalysisPanelProps) {
             </Text>
           </div>
         </Group>
+
+        <Divider />
+
+        <Group grow>
+          <div>
+            <Text size="xs" c="dimmed">
+              文字元素
+            </Text>
+            <Text size="sm" fw={600}>
+              {analysis.textElements.count} 个
+            </Text>
+          </div>
+          <div>
+            <Text size="xs" c="dimmed">
+              装饰元素
+            </Text>
+            <Text size="sm" fw={600}>
+              {analysis.decorationElements.count} 个
+            </Text>
+          </div>
+          <div>
+            <Text size="xs" c="dimmed">
+              铅条
+            </Text>
+            <Text size="sm" fw={600}>
+              {analysis.leadElements.count} 个
+            </Text>
+          </div>
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
+
+interface DiagnosisPanelProps {
+  diagnosis: LayoutDiagnosis;
+  onOptimize: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  showPreview: boolean;
+  onTogglePreview: (show: boolean) => void;
+  isOptimized: boolean;
+  optimizedScore?: number;
+}
+
+function getSeverityIcon(severity: DiagnosisSuggestion['severity']) {
+  switch (severity) {
+    case 'error':
+      return <IconAlertCircle size={16} />;
+    case 'warning':
+      return <IconAlertTriangle size={16} />;
+    case 'info':
+    default:
+      return <IconBulb size={16} />;
+  }
+}
+
+function getSeverityColor(severity: DiagnosisSuggestion['severity']) {
+  switch (severity) {
+    case 'error':
+      return 'red';
+    case 'warning':
+      return 'yellow';
+    case 'info':
+    default:
+      return 'blue';
+  }
+}
+
+function getImpactBadge(impact: DiagnosisSuggestion['impact']) {
+  const labels: Record<string, string> = {
+    high: '影响大',
+    medium: '影响中',
+    low: '影响小',
+  };
+  const colors: Record<string, string> = {
+    high: 'red',
+    medium: 'yellow',
+    low: 'green',
+  };
+  return <Badge size="xs" color={colors[impact]}>{labels[impact]}</Badge>;
+}
+
+function getGradeInfo(grade: LayoutDiagnosis['grade']) {
+  const info = {
+    excellent: { label: '优秀', color: 'green', emoji: '🌟' },
+    good: { label: '良好', color: 'blue', emoji: '👍' },
+    fair: { label: '一般', color: 'yellow', emoji: '📝' },
+    poor: { label: '待优化', color: 'red', emoji: '⚠️' },
+  };
+  return info[grade];
+}
+
+export function DiagnosisPanel({
+  diagnosis,
+  onOptimize,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  showPreview,
+  onTogglePreview,
+  isOptimized,
+  optimizedScore,
+}: DiagnosisPanelProps) {
+  const gradeInfo = getGradeInfo(diagnosis.grade);
+
+  const scoreColor =
+    diagnosis.overallScore >= 85
+      ? 'green'
+      : diagnosis.overallScore >= 70
+      ? 'blue'
+      : diagnosis.overallScore >= 50
+      ? 'yellow'
+      : 'red';
+
+  return (
+    <Paper p="md" withBorder>
+      <Group justify="space-between" mb="md">
+        <Title order={4}>版面诊断</Title>
+        <Badge color={gradeInfo.color} variant="light">
+          {gradeInfo.emoji} {gradeInfo.label}
+        </Badge>
+      </Group>
+
+      <Stack gap="md">
+        <Box>
+          <Group justify="space-between" mb={6}>
+            <Text size="sm" fw={500}>
+              综合评分
+            </Text>
+            <Text size="lg" fw={700} c={scoreColor}>
+              {diagnosis.overallScore}
+              <Text size="xs" c="dimmed" span ml={4}>
+                / 100
+              </Text>
+            </Text>
+          </Group>
+          <Progress value={diagnosis.overallScore} color={scoreColor} size="lg" />
+
+          {isOptimized && optimizedScore !== undefined && (
+            <Group mt={8} gap="xs">
+              <IconArrowUpRight size={14} color="var(--mantine-color-green-filled)" />
+              <Text size="xs" c="green">
+                优化后评分: {optimizedScore} 分 (+{(optimizedScore - diagnosis.overallScore).toFixed(0)})
+              </Text>
+            </Group>
+          )}
+        </Box>
+
+        <Divider />
+
+        <Group grow>
+          <Tooltip label="撤销上一步优化">
+            <Button
+              variant="light"
+              leftSection={<IconArrowBackUp size={16} />}
+              onClick={onUndo}
+              disabled={!canUndo}
+              size="sm"
+            >
+              撤销
+            </Button>
+          </Tooltip>
+          <Tooltip label="重做已撤销的优化">
+            <Button
+              variant="light"
+              leftSection={<IconArrowForwardUp size={16} />}
+              onClick={onRedo}
+              disabled={!canRedo}
+              size="sm"
+            >
+              重做
+            </Button>
+          </Tooltip>
+        </Group>
+
+        <Group grow>
+          <Tooltip label={showPreview ? '显示当前版本' : '预览优化效果'}>
+            <Button
+              variant="light"
+              color={showPreview ? 'blue' : 'gray'}
+              leftSection={showPreview ? <IconEye size={16} /> : <IconEyeOff size={16} />}
+              onClick={() => onTogglePreview(!showPreview)}
+              disabled={!canUndo}
+              size="sm"
+            >
+              {showPreview ? '优化后' : '优化前'}
+            </Button>
+          </Tooltip>
+        </Group>
+
+        <Button
+          fullWidth
+          leftSection={<IconWand size={16} />}
+          onClick={onOptimize}
+          variant="gradient"
+          gradient={{ from: 'indigo', to: 'violet', deg: 180 }}
+        >
+          一键优化版面
+        </Button>
+
+        <Divider label="诊断建议" labelPosition="center" />
+
+        {diagnosis.suggestions.length === 0 ? (
+          <Alert icon={<IconCircleCheck size={16} />} color="green" title="版面状态良好">
+            未发现明显的排版问题，继续保持！
+          </Alert>
+        ) : (
+          <Accordion variant="separated" radius="sm">
+            {diagnosis.suggestions.map((suggestion) => (
+              <Accordion.Item key={suggestion.id} value={suggestion.id}>
+                <Accordion.Control>
+                  <Group gap="xs" wrap="nowrap">
+                    <Box c={getSeverityColor(suggestion.severity)} style={{ display: 'flex' }}>
+                      {getSeverityIcon(suggestion.severity)}
+                    </Box>
+                    <Text size="sm" fw={500} style={{ flex: 1 }}>
+                      {suggestion.title}
+                    </Text>
+                    {getImpactBadge(suggestion.impact)}
+                  </Group>
+                </Accordion.Control>
+                <Accordion.Panel>
+                  <Stack gap="sm">
+                    <Text size="sm" c="dimmed">
+                      {suggestion.description}
+                    </Text>
+                    <Box
+                      p="sm"
+                      style={{
+                        background: 'var(--mantine-color-blue-light)',
+                        borderRadius: 'var(--mantine-radius-sm)',
+                      }}
+                    >
+                      <Group gap="xs" mb={4}>
+                        <IconBulb size={14} color="var(--mantine-color-blue-filled)" />
+                        <Text size="sm" fw={500} c="blue">
+                          优化建议
+                        </Text>
+                      </Group>
+                      <Text size="sm">{suggestion.suggestion}</Text>
+                    </Box>
+                  </Stack>
+                </Accordion.Panel>
+              </Accordion.Item>
+            ))}
+          </Accordion>
+        )}
+
+        <Text size="xs" c="dimmed" ta="center" mt="xs">
+          共 {diagnosis.suggestions.length} 项建议 · 点击展开详情
+        </Text>
       </Stack>
     </Paper>
   );

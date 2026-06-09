@@ -42,6 +42,68 @@ export interface PaperConfig {
   backgroundColor: string;
 }
 
+export interface ValidationIssue {
+  id: string;
+  type: 'overflow' | 'overlap' | 'density' | 'imbalance' | 'size';
+  severity: 'warning' | 'error';
+  message: string;
+  elementIds?: string[];
+}
+
+export type DiagnosisType =
+  | 'title_heavy'
+  | 'body_dense'
+  | 'whitespace_insufficient'
+  | 'decoration_overpower'
+  | 'balance_left_right'
+  | 'balance_top_bottom'
+  | 'alignment_inconsistent'
+  | 'hierarchy_unclear';
+
+export interface DiagnosisSuggestion {
+  id: string;
+  type: DiagnosisType;
+  severity: 'info' | 'warning' | 'error';
+  title: string;
+  description: string;
+  suggestion: string;
+  elementIds?: string[];
+  impact: 'low' | 'medium' | 'high';
+}
+
+export interface LayoutDiagnosis {
+  suggestions: DiagnosisSuggestion[];
+  overallScore: number;
+  grade: 'excellent' | 'good' | 'fair' | 'poor';
+}
+
+export interface OptimizationResult {
+  elements: CanvasElement[];
+  changedElementIds: string[];
+  description: string;
+}
+
+export interface OptimizationHistoryEntry {
+  id: string;
+  timestamp: number;
+  beforeElements: CanvasElement[];
+  afterElements: CanvasElement[];
+  changedElementIds: string[];
+  description: string;
+}
+
+export type PaperSizeCategory = 'business_card' | 'small' | 'medium' | 'large' | 'poster';
+
+export interface PaperLayoutGuidelines {
+  minMargin: number;
+  recommendedMargin: number;
+  maxTextDensity: number;
+  minTextDensity: number;
+  titleBodyRatioMax: number;
+  titleBodyRatioMin: number;
+  maxDecorationWeightRatio: number;
+}
+
 export interface LayoutAnalysis {
   centerOfGravity: { x: number; y: number };
   textDensity: number;
@@ -54,14 +116,24 @@ export interface LayoutAnalysis {
   marginRight: number;
   marginTop: number;
   marginBottom: number;
-}
-
-export interface ValidationIssue {
-  id: string;
-  type: 'overflow' | 'overlap' | 'density' | 'imbalance' | 'size';
-  severity: 'warning' | 'error';
-  message: string;
-  elementIds?: string[];
+  textElements: {
+    count: number;
+    totalArea: number;
+    avgFontSize: number;
+    maxFontSize: number;
+    minFontSize: number;
+    titleCandidates: string[];
+    bodyCandidates: string[];
+  };
+  decorationElements: {
+    count: number;
+    totalWeight: number;
+    totalArea: number;
+  };
+  leadElements: {
+    count: number;
+    totalArea: number;
+  };
 }
 
 export interface DesignData {

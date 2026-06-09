@@ -6,6 +6,7 @@ import {
   Stack,
   Title,
   ScrollArea,
+  Badge,
   useMantineTheme,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
@@ -13,7 +14,7 @@ import { FabricCanvas } from './components/FabricCanvas';
 import { Toolbar } from './components/Toolbar';
 import { PropertyPanel } from './components/PropertyPanel';
 import { PaperSettings } from './components/PaperSettings';
-import { IssuesPanel, AnalysisPanel } from './components/AnalysisPanel';
+import { IssuesPanel, AnalysisPanel, DiagnosisPanel } from './components/AnalysisPanel';
 import type {
   CanvasElement,
   PaperConfig,
@@ -22,10 +23,13 @@ import type {
   DecorationElement,
   ValidationIssue,
   LayoutAnalysis,
+  LayoutDiagnosis,
+  OptimizationHistoryEntry,
 } from './types';
 import { generateId, clamp } from './utils/helpers';
-import { analyzeLayout } from './utils/layoutAnalysis';
+import { analyzeLayout, diagnoseLayout } from './utils/layoutAnalysis';
 import { runAllValidations, validateTextOverlap } from './utils/validation';
+import { optimizeLayout, optimizeForPaperSize } from './utils/layoutOptimizer';
 import { importDesign, downloadDesignFile } from './utils/designStorage';
 
 const DEFAULT_PAPER: PaperConfig = {
@@ -33,6 +37,8 @@ const DEFAULT_PAPER: PaperConfig = {
   height: 842,
   backgroundColor: '#ffffff',
 };
+
+const MAX_HISTORY_SIZE = 20;
 
 function App() {
   const theme = useMantineTheme();
@@ -42,17 +48,127 @@ function App() {
   const [zoom, setZoom] = useState(0.8);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [optimizationHistory, setOptimizationHistory] = useState<OptimizationHistoryEntry[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [showOptimizedPreview, setShowOptimizedPreview] = useState(false);
+
+  const prevPaperRef = useRef<PaperConfig>(paper);
+
   const selectedElement = useMemo(() => {
     return elements.find((e) => e.id === selectedId) || null;
   }, [elements, selectedId]);
 
+  const displayElements = useMemo(() => {
+    if (showOptimizedPreview && historyIndex >= 0 && historyIndex < optimizationHistory.length) {
+      return optimizationHistory[historyIndex].afterElements;
+    }
+    return elements;
+  }, [showOptimizedPreview, elements, optimizationHistory, historyIndex]);
+
   const layoutAnalysis: LayoutAnalysis = useMemo(() => {
-    return analyzeLayout(elements, paper);
-  }, [elements, paper]);
+    return analyzeLayout(displayElements, paper);
+  }, [displayElements, paper]);
 
   const validationIssues: ValidationIssue[] = useMemo(() => {
-    return runAllValidations(elements, paper);
-  }, [elements, paper]);
+    return runAllValidations(displayElements, paper);
+  }, [displayElements, paper]);
+
+  const layoutDiagnosis: LayoutDiagnosis = useMemo(() => {
+    return diagnoseLayout(displayElements, paper);
+  }, [displayElements, paper]);
+
+  const optimizedDiagnosis: LayoutDiagnosis | undefined = useMemo(() => {
+    if (historyIndex >= 0 && historyIndex < optimizationHistory.length) {
+      return diagnoseLayout(optimizationHistory[historyIndex].afterElements, paper);
+    }
+    return undefined;
+  }, [optimizationHistory, historyIndex, paper]);
+
+  const canUndo = historyIndex >= 0;
+  const canRedo = historyIndex < optimizationHistory.length - 1;
+
+  const pushOptimizationHistory = useCallback((entry: OptimizationHistoryEntry) => {
+    setOptimizationHistory((prev) => {
+      const trimmed = prev.slice(0, historyIndex + 1);
+      const updated = [...trimmed, entry];
+      if (updated.length > MAX_HISTORY_SIZE) {
+        return updated.slice(updated.length - MAX_HISTORY_SIZE);
+      }
+      return updated;
+    });
+    setHistoryIndex((prev) => Math.min(prev + 1, MAX_HISTORY_SIZE - 1));
+  }, [historyIndex]);
+
+  const handleOptimize = useCallback(() => {
+    const result = optimizeLayout(elements, paper);
+
+    if (result.changedElementIds.length === 0) {
+      notifications.show({
+        title: '无需优化',
+        message: result.description,
+        color: 'green',
+      });
+      return;
+    }
+
+    const entry: OptimizationHistoryEntry = {
+      id: generateId(),
+      timestamp: Date.now(),
+      beforeElements: [...elements],
+      afterElements: result.elements,
+      changedElementIds: result.changedElementIds,
+      description: result.description,
+    };
+
+    pushOptimizationHistory(entry);
+    setElements(result.elements);
+    setShowOptimizedPreview(false);
+
+    notifications.show({
+      title: '优化完成',
+      message: result.description,
+      color: 'green',
+    });
+  }, [elements, paper, pushOptimizationHistory]);
+
+  const handleUndo = useCallback(() => {
+    if (!canUndo) return;
+
+    const entry = optimizationHistory[historyIndex];
+    if (entry) {
+      setElements(entry.beforeElements);
+      setHistoryIndex((prev) => prev - 1);
+      setShowOptimizedPreview(false);
+
+      notifications.show({
+        title: '已撤销',
+        message: '已恢复到优化前的状态',
+        color: 'blue',
+      });
+    }
+  }, [canUndo, optimizationHistory, historyIndex]);
+
+  const handleRedo = useCallback(() => {
+    if (!canRedo) return;
+
+    const nextIndex = historyIndex + 1;
+    const entry = optimizationHistory[nextIndex];
+    if (entry) {
+      setElements(entry.afterElements);
+      setHistoryIndex(nextIndex);
+      setShowOptimizedPreview(false);
+
+      notifications.show({
+        title: '已重做',
+        message: entry.description,
+        color: 'blue',
+      });
+    }
+  }, [canRedo, optimizationHistory, historyIndex]);
+
+  const handleTogglePreview = useCallback((show: boolean) => {
+    setShowOptimizedPreview(show);
+  }, []);
 
   const handleAddText = useCallback(() => {
     const newElement: TextElement = {
@@ -73,6 +189,8 @@ function App() {
     };
     setElements((prev) => [...prev, newElement]);
     setSelectedId(newElement.id);
+    setOptimizationHistory([]);
+    setHistoryIndex(-1);
   }, [elements.length]);
 
   const handleAddLead = useCallback(() => {
@@ -88,6 +206,8 @@ function App() {
     };
     setElements((prev) => [...prev, newElement]);
     setSelectedId(newElement.id);
+    setOptimizationHistory([]);
+    setHistoryIndex(-1);
   }, [elements.length]);
 
   const handleAddDecoration = useCallback(() => {
@@ -106,12 +226,16 @@ function App() {
     };
     setElements((prev) => [...prev, newElement]);
     setSelectedId(newElement.id);
+    setOptimizationHistory([]);
+    setHistoryIndex(-1);
   }, [elements.length]);
 
   const handleDeleteSelected = useCallback(() => {
     if (!selectedId) return;
     setElements((prev) => prev.filter((e) => e.id !== selectedId));
     setSelectedId(null);
+    setOptimizationHistory([]);
+    setHistoryIndex(-1);
     notifications.show({
       title: '已删除',
       message: '选中的元素已被删除',
@@ -183,16 +307,40 @@ function App() {
   }, [paper.width, paper.height]);
 
   const handleUpdatePaper = useCallback((newPaper: PaperConfig) => {
-    setPaper(newPaper);
-    const issues = runAllValidations(elements, newPaper);
-    const overflowIssues = issues.filter((i) => i.type === 'overflow');
-    if (overflowIssues.length > 0) {
-      notifications.show({
-        title: '警告',
-        message: `有 ${overflowIssues.length} 个元素超出新纸张边界`,
-        color: 'yellow',
-      });
+    const oldPaper = prevPaperRef.current;
+
+    if (
+      (newPaper.width !== oldPaper.width || newPaper.height !== oldPaper.height) &&
+      elements.length > 0
+    ) {
+      const result = optimizeForPaperSize(elements, oldPaper, newPaper);
+
+      setPaper(newPaper);
+      setElements(result.elements);
+      setOptimizationHistory([]);
+      setHistoryIndex(-1);
+
+      const issues = runAllValidations(result.elements, newPaper);
+      const overflowIssues = issues.filter((i) => i.type === 'overflow');
+
+      if (overflowIssues.length > 0) {
+        notifications.show({
+          title: '纸张尺寸已更新',
+          message: `${result.description}，但有 ${overflowIssues.length} 个元素超出边界`,
+          color: 'yellow',
+        });
+      } else {
+        notifications.show({
+          title: '纸张尺寸已更新',
+          message: result.description,
+          color: 'green',
+        });
+      }
+    } else {
+      setPaper(newPaper);
     }
+
+    prevPaperRef.current = newPaper;
   }, [elements]);
 
   const handleExport = useCallback(() => {
@@ -221,7 +369,10 @@ function App() {
       if (data) {
         setElements(data.elements);
         setPaper(data.paper);
+        prevPaperRef.current = data.paper;
         setSelectedId(null);
+        setOptimizationHistory([]);
+        setHistoryIndex(-1);
         notifications.show({
           title: '导入成功',
           message: `成功导入 ${data.elements.length} 个元素`,
@@ -252,6 +403,8 @@ function App() {
     setZoom(0.8);
   }, []);
 
+  const isOptimizedState = canUndo;
+
   return (
     <AppShell
       padding="md"
@@ -262,7 +415,7 @@ function App() {
         collapsed: { mobile: true },
       }}
       aside={{
-        width: 300,
+        width: 320,
         breakpoint: 'md',
         collapsed: { desktop: false, mobile: true },
       }}
@@ -279,6 +432,11 @@ function App() {
             <Title order={3} c="dark">
               活版印刷工作室
             </Title>
+            {showOptimizedPreview && (
+              <Badge color="blue" variant="light" size="lg">
+                预览优化效果
+              </Badge>
+            )}
           </Group>
           <Toolbar
             onAddText={handleAddText}
@@ -322,11 +480,12 @@ function App() {
               boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
               borderRadius: 4,
               overflow: 'hidden',
+              transition: 'box-shadow 0.3s',
             }}
           >
             <FabricCanvas
               paper={paper}
-              elements={elements}
+              elements={displayElements}
               selectedId={selectedId}
               onElementSelect={handleElementSelect}
               onElementMove={handleElementMove}
@@ -340,6 +499,18 @@ function App() {
       <AppShell.Aside p="md">
         <ScrollArea h="100%">
           <Stack gap="md">
+            <DiagnosisPanel
+              diagnosis={layoutDiagnosis}
+              onOptimize={handleOptimize}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              showPreview={showOptimizedPreview}
+              onTogglePreview={handleTogglePreview}
+              isOptimized={isOptimizedState}
+              optimizedScore={optimizedDiagnosis?.overallScore}
+            />
             <AnalysisPanel analysis={layoutAnalysis} />
             <IssuesPanel issues={validationIssues} />
           </Stack>
