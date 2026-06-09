@@ -39,6 +39,85 @@ export function FabricCanvas({
   const fabricCanvasRef = useRef<Canvas | null>(null);
   const fabricObjectsRef = useRef<Map<string, FabricObject>>(new Map());
   const isProgrammaticChangeRef = useRef(false);
+  const paperRef = useRef(paper);
+  const elementsRef = useRef(elements);
+
+  useEffect(() => {
+    paperRef.current = paper;
+  }, [paper]);
+
+  useEffect(() => {
+    elementsRef.current = elements;
+  }, [elements]);
+
+  const getElementData = (obj: FabricObject): { id: string; elementType: string } | undefined => {
+    return (obj as unknown as { data?: { id: string; elementType: string } }).data;
+  };
+
+  const getObjectBounds = (obj: FabricObject): { left: number; top: number; right: number; bottom: number } => {
+    const objWidth = ((obj.get('width') as number) || 0) * ((obj.get('scaleX') as number) || 1);
+    const objHeight = ((obj.get('height') as number) || 0) * ((obj.get('scaleY') as number) || 1);
+    const left = (obj.get('left') as number) || 0;
+    const top = (obj.get('top') as number) || 0;
+    return {
+      left,
+      top,
+      right: left + objWidth,
+      bottom: top + objHeight,
+    };
+  };
+
+  const constrainToBounds = useCallback((obj: FabricObject) => {
+    const p = paperRef.current;
+    const { width, height } = obj;
+    const objWidth = (width || 0) * ((obj.get('scaleX') as number) || 1);
+    const objHeight = (height || 0) * ((obj.get('scaleY') as number) || 1);
+
+    let left = (obj.get('left') as number) || 0;
+    let top = (obj.get('top') as number) || 0;
+
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (left + objWidth > p.width) left = p.width - objWidth;
+    if (top + objHeight > p.height) top = p.height - objHeight;
+
+    obj.set('left', left);
+    obj.set('top', top);
+  }, []);
+
+  const checkTextOverlap = useCallback((movingObj: FabricObject): boolean => {
+    const movingData = getElementData(movingObj);
+    if (!movingData || movingData.elementType !== 'text') return false;
+
+    const movingBounds = getObjectBounds(movingObj);
+    const movingArea = (movingBounds.right - movingBounds.left) * (movingBounds.bottom - movingBounds.top);
+
+    const allObjects = fabricCanvasRef.current?.getObjects() || [];
+
+    for (const obj of allObjects) {
+      const data = getElementData(obj);
+      if (!data || data.id === movingData.id || data.elementType !== 'text') continue;
+
+      const objBounds = getObjectBounds(obj);
+      const objArea = (objBounds.right - objBounds.left) * (objBounds.bottom - objBounds.top);
+
+      const overlapLeft = Math.max(movingBounds.left, objBounds.left);
+      const overlapRight = Math.min(movingBounds.right, objBounds.right);
+      const overlapTop = Math.max(movingBounds.top, objBounds.top);
+      const overlapBottom = Math.min(movingBounds.bottom, objBounds.bottom);
+
+      if (overlapLeft < overlapRight && overlapTop < overlapBottom) {
+        const overlapArea = (overlapRight - overlapLeft) * (overlapBottom - overlapTop);
+        const minArea = Math.min(movingArea, objArea);
+
+        if (overlapArea >= minArea * 0.95) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }, []);
 
   const createFabricObject = useCallback((element: CanvasElement): FabricObject => {
     let obj: FabricObject;
@@ -126,9 +205,10 @@ export function FabricCanvas({
       }
     }
 
-    (obj as unknown as { data: { id: string; elementType: string } }).data = {
+    (obj as unknown as { data: { id: string; elementType: string; shape?: string } }).data = {
       id: element.id,
       elementType: element.type,
+      shape: element.type === 'decoration' ? (element as DecorationElement).shape : undefined,
     };
     obj.set('hasControls', true);
     obj.set('transparentCorners', false);
@@ -153,6 +233,7 @@ export function FabricCanvas({
         textObj.set('textAlign', textEl.textAlign);
         textObj.set('fill', textEl.fill);
         textObj.set('width', element.width);
+        textObj.set('height', element.height);
       } else if (element.type === 'lead') {
         const leadEl = element as LeadElement;
         const rect = obj as Rect;
@@ -161,9 +242,26 @@ export function FabricCanvas({
         rect.set('fill', leadEl.fill);
       } else {
         const decoEl = element as DecorationElement;
+        const objData = (obj as unknown as { data?: { shape?: string } }).data;
+        if (objData?.shape !== decoEl.shape) {
+          isProgrammaticChangeRef.current = false;
+          return false;
+        }
+
         obj.set('fill', decoEl.fill);
         if (obj.type === 'circle') {
           (obj as Circle).set('radius', Math.min(element.width, element.height) / 2);
+        } else if (obj.type === 'line') {
+          (obj as Line).set('x2', element.width);
+          (obj as Line).set('strokeWidth', element.height > 0 ? element.height : 2);
+        } else if (obj.type === 'polygon') {
+          const newPoints = [
+            { x: element.width / 2, y: 0 },
+            { x: element.width, y: element.height / 2 },
+            { x: element.width / 2, y: element.height },
+            { x: 0, y: element.height / 2 },
+          ];
+          (obj as Polygon).set('points', newPoints);
         } else {
           obj.set('width', element.width);
           obj.set('height', element.height);
@@ -181,6 +279,7 @@ export function FabricCanvas({
       obj.setCoords();
 
       isProgrammaticChangeRef.current = false;
+      return true;
     },
     []
   );
@@ -198,13 +297,23 @@ export function FabricCanvas({
 
     fabricCanvasRef.current = canvas;
 
+    let lastValidPosition = { left: 0, top: 0 };
+
+    const updateLastValid = (obj: FabricObject) => {
+      lastValidPosition = {
+        left: (obj.get('left') as number) || 0,
+        top: (obj.get('top') as number) || 0,
+      };
+    };
+
     canvas.on('selection:created', (e) => {
       const selected = e.selected as FabricObject[] | undefined;
       if (selected && selected.length === 1) {
         const obj = selected[0];
-        const data = (obj as unknown as { data?: { id: string } }).data;
+        const data = getElementData(obj);
         if (data?.id) {
           onElementSelect(data.id);
+          updateLastValid(obj);
         }
       }
     });
@@ -213,9 +322,10 @@ export function FabricCanvas({
       const selected = e.selected as FabricObject[] | undefined;
       if (selected && selected.length === 1) {
         const obj = selected[0];
-        const data = (obj as unknown as { data?: { id: string } }).data;
+        const data = getElementData(obj);
         if (data?.id) {
           onElementSelect(data.id);
+          updateLastValid(obj);
         }
       }
     });
@@ -224,27 +334,63 @@ export function FabricCanvas({
       onElementSelect(null);
     });
 
+    canvas.on('object:moving', (e) => {
+      if (isProgrammaticChangeRef.current) return;
+      const obj = e.target as FabricObject;
+      if (!obj) return;
+
+      constrainToBounds(obj);
+
+      if (checkTextOverlap(obj)) {
+        obj.set('left', lastValidPosition.left);
+        obj.set('top', lastValidPosition.top);
+      } else {
+        lastValidPosition = {
+          left: (obj.get('left') as number) || 0,
+          top: (obj.get('top') as number) || 0,
+        };
+      }
+
+      const data = getElementData(obj);
+      if (data?.id) {
+        onElementMove(data.id, (obj.get('left') as number) || 0, (obj.get('top') as number) || 0);
+      }
+    });
+
+    canvas.on('object:scaling', (e) => {
+      if (isProgrammaticChangeRef.current) return;
+      const obj = e.target as FabricObject;
+      if (!obj) return;
+
+      constrainToBounds(obj);
+    });
+
     canvas.on('object:modified', (e) => {
       if (isProgrammaticChangeRef.current) return;
       const obj = e.target as FabricObject;
       if (!obj) return;
 
-      const data = (obj as unknown as { data?: { id: string } }).data;
+      const data = getElementData(obj);
       if (!data?.id) return;
-
-      const left = (obj.get('left') as number) || 0;
-      const top = (obj.get('top') as number) || 0;
-      const angle = (obj.get('angle') as number) || 0;
 
       const scaleX = (obj.get('scaleX') as number) || 1;
       const scaleYVal = (obj.get('scaleY') as number) || 1;
       const currentWidth = ((obj.get('width') as number) || 0) * scaleX;
       const currentHeight = ((obj.get('height') as number) || 0) * scaleYVal;
 
+      if (checkTextOverlap(obj)) {
+        obj.set('scaleX', 1);
+        obj.set('scaleY', 1);
+        obj.set('width', currentWidth);
+        obj.set('height', currentHeight);
+        obj.setCoords();
+        return;
+      }
+
       onElementModify(data.id, {
-        x: left,
-        y: top,
-        rotation: angle,
+        x: (obj.get('left') as number) || 0,
+        y: (obj.get('top') as number) || 0,
+        rotation: (obj.get('angle') as number) || 0,
         width: currentWidth,
         height: currentHeight,
       });
@@ -254,17 +400,6 @@ export function FabricCanvas({
       obj.set('width', currentWidth);
       obj.set('height', currentHeight);
       obj.setCoords();
-    });
-
-    canvas.on('object:moving', (e) => {
-      if (isProgrammaticChangeRef.current) return;
-      const obj = e.target as FabricObject;
-      if (!obj) return;
-
-      const data = (obj as unknown as { data?: { id: string } }).data;
-      if (!data?.id) return;
-
-      onElementMove(data.id, (obj.get('left') as number) || 0, (obj.get('top') as number) || 0);
     });
 
     return () => {
@@ -308,7 +443,19 @@ export function FabricCanvas({
     for (const element of elements) {
       const existingObj = fabricObjectsRef.current.get(element.id);
       if (existingObj) {
-        updateFabricObject(existingObj, element);
+        const updated = updateFabricObject(existingObj, element);
+        if (!updated) {
+          canvas.remove(existingObj);
+          fabricObjectsRef.current.delete(element.id);
+
+          const newObj = createFabricObject(element);
+          fabricObjectsRef.current.set(element.id, newObj);
+          canvas.add(newObj);
+
+          if (selectedId === element.id) {
+            canvas.setActiveObject(newObj);
+          }
+        }
       } else {
         const newObj = createFabricObject(element);
         fabricObjectsRef.current.set(element.id, newObj);

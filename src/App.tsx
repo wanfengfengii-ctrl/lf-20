@@ -23,9 +23,9 @@ import type {
   ValidationIssue,
   LayoutAnalysis,
 } from './types';
-import { generateId } from './utils/helpers';
+import { generateId, clamp } from './utils/helpers';
 import { analyzeLayout } from './utils/layoutAnalysis';
-import { runAllValidations } from './utils/validation';
+import { runAllValidations, validateTextOverlap } from './utils/validation';
 import { importDesign, downloadDesignFile } from './utils/designStorage';
 
 const DEFAULT_PAPER: PaperConfig = {
@@ -145,19 +145,42 @@ function App() {
   }, []);
 
   const handleUpdateElement = useCallback((id: string, updates: Partial<CanvasElement>) => {
-    setElements((prev) =>
-      prev.map((el) => {
+    setElements((prev) => {
+      const element = prev.find((el) => el.id === id);
+      if (!element) return prev;
+
+      const updated = { ...element, ...updates } as CanvasElement;
+
+      if (updated.type === 'text') {
+        const textEl = updated as TextElement;
+        if (textEl.fontSize <= 0) return prev;
+      }
+      if (updated.width <= 0 || updated.height <= 0) return prev;
+
+      updated.x = clamp(updated.x, 0, paper.width - updated.width);
+      updated.y = clamp(updated.y, 0, paper.height - updated.height);
+
+      if (updated.type === 'text') {
+        const otherElements = prev.filter((el) => el.id !== id);
+        const testElements = [...otherElements, updated];
+        const overlapIssues = validateTextOverlap(testElements);
+        if (overlapIssues.length > 0) {
+          return prev;
+        }
+      }
+
+      return prev.map((el) => {
         if (el.id !== id) return el;
         if (el.type === 'text') {
-          return { ...el, ...updates } as TextElement;
+          return { ...el, ...updated } as TextElement;
         } else if (el.type === 'lead') {
-          return { ...el, ...updates } as LeadElement;
+          return { ...el, ...updated } as LeadElement;
         } else {
-          return { ...el, ...updates } as DecorationElement;
+          return { ...el, ...updated } as DecorationElement;
         }
-      })
-    );
-  }, []);
+      });
+    });
+  }, [paper.width, paper.height]);
 
   const handleUpdatePaper = useCallback((newPaper: PaperConfig) => {
     setPaper(newPaper);
