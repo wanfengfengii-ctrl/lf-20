@@ -15,6 +15,7 @@ import { Toolbar } from './components/Toolbar';
 import { PropertyPanel } from './components/PropertyPanel';
 import { PaperSettings } from './components/PaperSettings';
 import { IssuesPanel, AnalysisPanel, DiagnosisPanel } from './components/AnalysisPanel';
+import { TemplateLibraryModal } from './components/TemplateLibraryModal';
 import type {
   CanvasElement,
   PaperConfig,
@@ -31,6 +32,8 @@ import { analyzeLayout, diagnoseLayout } from './utils/layoutAnalysis';
 import { runAllValidations, validateTextOverlap } from './utils/validation';
 import { optimizeLayout, optimizeForPaperSize } from './utils/layoutOptimizer';
 import { importDesign, downloadDesignFile } from './utils/designStorage';
+import { applyTemplateToNewDesign, applyTemplate } from './utils/templateStorage';
+import type { DesignTemplate } from './types';
 
 const DEFAULT_PAPER: PaperConfig = {
   width: 595,
@@ -51,6 +54,7 @@ function App() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showCompareView, setShowCompareView] = useState(false);
+  const [templateModalOpened, setTemplateModalOpened] = useState(false);
   const isProgrammaticChangeRef = useRef(false);
   const elementsBeforeModifyRef = useRef<CanvasElement[] | null>(null);
 
@@ -476,6 +480,41 @@ function App() {
     fileInputRef.current?.click();
   }, []);
 
+  const handleOpenTemplates = useCallback(() => {
+    setTemplateModalOpened(true);
+  }, []);
+
+  const handleApplyTemplate = useCallback(
+    (template: DesignTemplate) => {
+      const beforeElements = [...elements];
+      const beforePaper = { ...paper };
+
+      const result = applyTemplateToNewDesign(template);
+
+      pushHistory({
+        type: 'import',
+        description: `套用模板 "${template.name}"`,
+        beforeElements,
+        afterElements: result.elements,
+        beforePaper,
+        afterPaper: result.paper,
+      });
+
+      setElements(result.elements);
+      setPaper(result.paper);
+      prevPaperRef.current = result.paper;
+      setSelectedId(null);
+      setShowCompareView(false);
+
+      notifications.show({
+        title: '模板已套用',
+        message: `成功套用模板 "${template.name}"`,
+        color: 'green',
+      });
+    },
+    [elements, paper, pushHistory]
+  );
+
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -578,6 +617,7 @@ function App() {
             onDeleteSelected={handleDeleteSelected}
             onExport={handleExport}
             onImport={handleImport}
+            onOpenTemplates={handleOpenTemplates}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onZoomReset={handleZoomReset}
@@ -707,6 +747,14 @@ function App() {
         accept=".json"
         style={{ display: 'none' }}
         onChange={handleFileChange}
+      />
+
+      <TemplateLibraryModal
+        opened={templateModalOpened}
+        onClose={() => setTemplateModalOpened(false)}
+        onApplyTemplate={handleApplyTemplate}
+        elements={elements}
+        paper={paper}
       />
     </AppShell>
   );

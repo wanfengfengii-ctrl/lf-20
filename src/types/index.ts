@@ -148,6 +148,77 @@ export interface DesignData {
   createdAt: string;
 }
 
+export type TemplateType = 'full' | 'style';
+
+export interface StyleRule {
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: 'normal' | 'bold';
+  fontStyle: 'normal' | 'italic';
+  textAlign: 'left' | 'center' | 'right';
+  fill: string;
+}
+
+export interface DecorationStyle {
+  shape: 'line' | 'circle' | 'rect' | 'diamond';
+  fill: string;
+  strokeWidth: number;
+  strokeColor: string;
+}
+
+export interface WhitespaceConfig {
+  marginTop: number;
+  marginBottom: number;
+  marginLeft: number;
+  marginRight: number;
+  lineSpacing: number;
+  paragraphSpacing: number;
+}
+
+export interface TemplateStyle {
+  titleStyle: StyleRule;
+  bodyStyle: StyleRule;
+  decorationStyle: DecorationStyle;
+  leadColor: string;
+  whitespace: WhitespaceConfig;
+  backgroundColor: string;
+}
+
+export interface TemplateLayoutInfo {
+  titlePositions: { x: number; y: number; width: number; height: number }[];
+  bodyPositions: { x: number; y: number; width: number; height: number }[];
+  leadPositions: { x: number; y: number; width: number; height: number }[];
+  decorationPositions: { x: number; y: number; width: number; height: number; shape: string }[];
+}
+
+export interface DesignTemplate {
+  id: string;
+  name: string;
+  category: string;
+  tags: string[];
+  description: string;
+  thumbnail: string | null;
+  type: TemplateType;
+  paper: PaperConfig;
+  elements?: CanvasElement[];
+  style?: TemplateStyle;
+  layout?: TemplateLayoutInfo;
+  createdAt: string;
+  updatedAt: string;
+  usageCount: number;
+}
+
+export const TEMPLATE_CATEGORIES = [
+  '全部',
+  '名片',
+  '海报',
+  '传单',
+  '邀请函',
+  '信纸',
+  '书籍封面',
+  '其他',
+];
+
 export const FONT_FAMILIES = [
   'Georgia',
   'Times New Roman',

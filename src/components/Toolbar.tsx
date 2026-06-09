@@ -8,6 +8,7 @@ import {
   IconUpload,
   IconZoomIn,
   IconZoomOut,
+  IconTemplate,
 } from '@tabler/icons-react';
 
 interface ToolbarProps {
@@ -17,6 +18,7 @@ interface ToolbarProps {
   onDeleteSelected: () => void;
   onExport: () => void;
   onImport: () => void;
+  onOpenTemplates: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
@@ -31,6 +33,7 @@ export function Toolbar({
   onDeleteSelected,
   onExport,
   onImport,
+  onOpenTemplates,
   onZoomIn,
   onZoomOut,
   onZoomReset,
@@ -67,6 +70,12 @@ export function Toolbar({
           disabled={!hasSelection}
         >
           删除
+        </Button>
+      </Tooltip>
+
+      <Tooltip label="模板库">
+        <Button leftSection={<IconTemplate size={16} />} variant="light" onClick={onOpenTemplates} size="sm">
+          模板库
         </Button>
       </Tooltip>
 
